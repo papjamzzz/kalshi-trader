@@ -8,23 +8,18 @@ import time
 import uuid
 import requests
 from datetime import datetime
+from kalshi_auth import signed_headers
 
 BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
-
-
-def _headers():
-    key = os.getenv("KALSHI_API_KEY", "")
-    return {
-        "Authorization": f"Token {key}",
-        "Content-Type": "application/json",
-    }
+API_PATH = "/trade-api/v2"
 
 
 def _get(path, params=None, retries=3):
     url = f"{BASE_URL}{path}"
     for attempt in range(retries):
         try:
-            r = requests.get(url, headers=_headers(), params=params, timeout=10)
+            headers = signed_headers("GET", f"{API_PATH}{path}")
+            r = requests.get(url, headers=headers, params=params, timeout=10)
             if r.status_code == 429:
                 time.sleep(2 ** attempt)
                 continue
@@ -41,7 +36,8 @@ def _post(path, body, retries=2):
     url = f"{BASE_URL}{path}"
     for attempt in range(retries):
         try:
-            r = requests.post(url, headers=_headers(), json=body, timeout=10)
+            headers = signed_headers("POST", f"{API_PATH}{path}")
+            r = requests.post(url, headers=headers, json=body, timeout=10)
             r.raise_for_status()
             return r.json()
         except Exception as e:
@@ -55,7 +51,8 @@ def _delete(path, retries=2):
     url = f"{BASE_URL}{path}"
     for attempt in range(retries):
         try:
-            r = requests.delete(url, headers=_headers(), timeout=10)
+            headers = signed_headers("DELETE", f"{API_PATH}{path}")
+            r = requests.delete(url, headers=headers, timeout=10)
             r.raise_for_status()
             return r.json()
         except Exception as e:
