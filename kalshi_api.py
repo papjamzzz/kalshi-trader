@@ -74,10 +74,11 @@ def get_balance():
 
 
 def get_positions():
-    """Returns list of open positions."""
+    """Returns list of open positions (non-zero only)."""
     try:
         data = _get("/portfolio/positions")
-        return data.get("market_positions", [])
+        all_pos = data.get("market_positions", [])
+        return [p for p in all_pos if float(p.get("position", 0)) != 0]
     except Exception:
         return []
 
@@ -97,7 +98,7 @@ def get_market(ticker):
 
 def place_order(ticker, side, count, price_cents, action="buy"):
     """
-    Place a limit order.
+    Place a limit order via /portfolio/orders.
 
     ticker      : market ticker string
     side        : 'yes' or 'no'
@@ -114,17 +115,17 @@ def place_order(ticker, side, count, price_cents, action="buy"):
         "type": "limit",
         "action": action,
         "side": side,
-        "count": count,
+        "count": int(count),
         "yes_price": price_cents if side == "yes" else (100 - price_cents),
     }
-    result = _post("/orders", body)
+    result = _post("/portfolio/orders", body)
     return result.get("order", result)
 
 
 def cancel_order(order_id):
     """Cancel a resting order by ID."""
     try:
-        return _delete(f"/orders/{order_id}")
+        return _delete(f"/portfolio/orders/{order_id}")
     except Exception as e:
         return {"error": str(e)}
 
@@ -132,7 +133,7 @@ def cancel_order(order_id):
 def get_orders(status="resting"):
     """Get list of orders by status: resting | canceled | executed | all"""
     try:
-        data = _get("/orders", params={"status": status})
+        data = _get("/portfolio/orders", params={"status": status})
         return data.get("orders", [])
     except Exception:
         return []
