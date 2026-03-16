@@ -32,6 +32,8 @@ DEFAULT_SETTINGS = {
     "stop_loss_pct":   20.0,    # % loss to exit
     "min_edge_score":  65.0,    # KK edge score threshold (0–100)
     "scan_interval":   90,      # seconds between scans
+    "notify_sms":      True,    # send SMS on trades
+    "notify_email":    True,    # send email on trades
 }
 
 SETTINGS_FILE = "settings.json"
@@ -303,7 +305,8 @@ class TradingEngine:
             trade_entry = {**position, "event": "buy", "pnl": 0}
             self._record_trade(trade_entry)
 
-            notifier.notify_buy(ticker, side, count, entry_price, actual_cost)
+            if self.settings.get("notify_sms") or self.settings.get("notify_email"):
+                notifier.notify_buy(ticker, side, count, entry_price, actual_cost)
             self._status_msg = f"Entered {ticker} {side.upper()} @ {entry_price}¢"
 
         except Exception as e:
@@ -410,23 +413,25 @@ class TradingEngine:
         }
         self._record_trade(trade_record)
 
-        if pnl_dollars >= 0:
-            notifier.notify_profit(
-                ticker, side, count, entry, exit_price,
-                round(pnl_dollars, 2), round(pnl_pct, 1),
-                round(self._daily_pnl, 2), self._wins, self._losses
-            )
-        else:
-            notifier.notify_loss(
-                ticker, side, count, entry, exit_price,
-                round(abs(pnl_dollars), 2), round(abs(pnl_pct), 1),
-                round(self._daily_pnl, 2)
-            )
+        if self.settings.get("notify_sms") or self.settings.get("notify_email"):
+            if pnl_dollars >= 0:
+                notifier.notify_profit(
+                    ticker, side, count, entry, exit_price,
+                    round(pnl_dollars, 2), round(pnl_pct, 1),
+                    round(self._daily_pnl, 2), self._wins, self._losses
+                )
+            else:
+                notifier.notify_loss(
+                    ticker, side, count, entry, exit_price,
+                    round(abs(pnl_dollars), 2), round(abs(pnl_pct), 1),
+                    round(self._daily_pnl, 2)
+                )
 
         # Check daily limit after recording
         if self._daily_limit_hit():
             cap = self.settings.get("daily_loss_cap", 50.0)
-            notifier.notify_daily_limit(cap, abs(self._daily_pnl))
+            if self.settings.get("notify_sms") or self.settings.get("notify_email"):
+                notifier.notify_daily_limit(cap, abs(self._daily_pnl))
             self._status_msg = f"Paused — daily limit ${cap:.0f} hit"
 
     # ── API Response Helpers ──────────────────────────────────────────────────
