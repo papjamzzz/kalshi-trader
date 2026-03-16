@@ -60,6 +60,40 @@ def positions():
 
 # ── Settings ──────────────────────────────────────────────────────────────────
 
+@app.route("/api/chat", methods=["POST"])
+def chat():
+    import json
+    data    = request.get_json(force=True)
+    message = data.get("message", "")
+    context = data.get("context", {})
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+
+    if not api_key:
+        return jsonify({"reply": "Chat requires ANTHROPIC_API_KEY in .env. Add it and restart."})
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        system = (
+            "You are KK, an AI assistant embedded in KK Trader — an autonomous Kalshi prediction market trading bot. "
+            "You have access to the user's live session data. Be concise, sharp, and direct. "
+            f"Current session: P&L={context.get('pnl','?')}, "
+            f"Open positions={context.get('positions','?')}, "
+            f"Wins={context.get('wins','?')}, Losses={context.get('losses','?')}, "
+            f"Markets watched={context.get('markets','?')}. "
+            f"Recent trades: {json.dumps(context.get('trades',[])[:5])}"
+        )
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=400,
+            system=system,
+            messages=[{"role": "user", "content": message}]
+        )
+        return jsonify({"reply": resp.content[0].text})
+    except Exception as e:
+        return jsonify({"reply": f"Chat error: {str(e)[:100]}"})
+
+
 @app.route("/api/balance")
 def balance():
     import kalshi_api as kapi

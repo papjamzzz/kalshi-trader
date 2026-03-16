@@ -295,10 +295,36 @@
     font-size: 12px;
     font-weight: 700;
     color: var(--green);
+    cursor: text;
+    border-bottom: 1px dashed transparent;
+    transition: border-color 0.15s;
+    padding-bottom: 1px;
   }
-  .fader-val.red   { color: var(--red); }
+  .fader-val:hover { border-bottom-color: rgba(0,213,149,0.4); }
+  .fader-val.red   { color: var(--red);   }
+  .fader-val.red:hover  { border-bottom-color: rgba(246,70,93,0.4); }
   .fader-val.amber { color: var(--amber); }
-  .fader-val.blue  { color: var(--blue); }
+  .fader-val.amber:hover{ border-bottom-color: rgba(245,166,35,0.4); }
+  .fader-val.blue  { color: var(--blue);  }
+  .fader-val.blue:hover { border-bottom-color: rgba(76,141,255,0.4); }
+
+  /* Inline edit input (replaces fader-val on click) */
+  .fader-edit-input {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--green);
+    color: var(--green);
+    outline: none;
+    width: 72px;
+    text-align: right;
+    padding: 0 0 1px 0;
+  }
+  .fader-edit-input.red   { color: var(--red);   border-bottom-color: var(--red); }
+  .fader-edit-input.amber { color: var(--amber); border-bottom-color: var(--amber); }
+  .fader-edit-input.blue  { color: var(--blue);  border-bottom-color: var(--blue); }
 
   .fader-desc {
     font-size: 10px;
@@ -614,6 +640,142 @@
   .empty-sub  { font-size: 11px; color: var(--dim); }
 
   /* ══════════════════════════════════════════════════════
+     CHAT PANEL
+  ══════════════════════════════════════════════════════ */
+  .chat-panel {
+    position: fixed;
+    top: 56px;
+    right: 0;
+    bottom: 0;
+    width: 340px;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 150;
+    transform: translateX(100%);
+    transition: transform 0.25s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: -8px 0 32px rgba(0,0,0,0.5);
+  }
+  .chat-panel.open { transform: translateX(0); }
+
+  .chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .chat-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .chat-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 3px;
+    transition: color 0.15s;
+  }
+  .chat-close:hover { color: var(--text); }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .chat-msg {
+    max-width: 90%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .chat-msg.bot {
+    background: var(--card2);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    align-self: flex-start;
+    border-bottom-left-radius: 2px;
+  }
+  .chat-msg.user {
+    background: var(--green-dim);
+    border: 1px solid rgba(0,213,149,0.15);
+    color: var(--text);
+    align-self: flex-end;
+    border-bottom-right-radius: 2px;
+  }
+  .chat-msg-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+    opacity: 0.5;
+  }
+
+  .chat-input-row {
+    display: flex;
+    gap: 8px;
+    padding: 12px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .chat-input {
+    flex: 1;
+    background: var(--card2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 12px;
+    padding: 8px 10px;
+    outline: none;
+    resize: none;
+    min-height: 36px;
+    max-height: 100px;
+    transition: border-color 0.15s;
+  }
+  .chat-input:focus { border-color: rgba(0,213,149,0.4); }
+  .chat-send {
+    background: var(--green);
+    border: none;
+    border-radius: 6px;
+    color: #000;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 0 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    align-self: flex-end;
+    height: 36px;
+  }
+  .chat-send:hover { background: #00eaa5; box-shadow: 0 0 12px var(--green-glow); }
+
+  /* Chat button in transport */
+  #btn-chat {
+    background: transparent;
+    color: var(--text2);
+    border-color: var(--border2);
+  }
+  #btn-chat:hover { color: var(--text); border-color: var(--text2); }
+  #btn-chat.active {
+    background: var(--green-dim);
+    color: var(--green);
+    border-color: rgba(0,213,149,0.3);
+  }
+
+  /* ══════════════════════════════════════════════════════
      SCROLLBAR
   ══════════════════════════════════════════════════════ */
   ::-webkit-scrollbar { width: 3px; height: 3px; }
@@ -651,7 +813,31 @@
   <button class="t-btn" id="btn-stop"  onclick="stopBot()">■&nbsp; Stop</button>
   <button class="t-btn" id="btn-kalshi"
           onclick="window.open('https://kalshi.com','_blank')">Kalshi ↗</button>
+  <button class="t-btn" id="btn-chat" onclick="toggleChat()">Chat</button>
 </header>
+
+<!-- ════════════════════════════════════════════
+     CHAT PANEL
+════════════════════════════════════════════ -->
+<div class="chat-panel" id="chat-panel">
+  <div class="chat-header">
+    <span class="chat-title">KK Assistant</span>
+    <button class="chat-close" onclick="toggleChat()">✕</button>
+  </div>
+  <div class="chat-messages" id="chat-messages">
+    <div class="chat-msg bot">
+      <div class="chat-msg-label">KK</div>
+      Hey. Ask me anything about your trades, positions, or markets. I can see your session data.
+    </div>
+  </div>
+  <div class="chat-input-row">
+    <textarea class="chat-input" id="chat-input"
+              placeholder="Ask about your trades..."
+              rows="1"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea>
+    <button class="chat-send" onclick="sendChat()">↑</button>
+  </div>
+</div>
 
 <!-- ════════════════════════════════════════════
      METRICS
@@ -1110,11 +1296,132 @@ function renderTrades() {
   });
 }
 
+// ─── Click-to-type fader values ──────────────────────────────────────────────
+// Config: maps fader id → { key, min, max, parse, format, colorClass }
+const FADER_CONFIG = {
+  'val-max-spend':   { key:'max_spend',       min:0.01,  max:10,     parse:v=>parseFloat(v),    format:v=>'$'+parseFloat(v).toFixed(2),  slider:'fader-max-spend',   sliderScale:v=>Math.round(v*100), color:'blue'  },
+  'val-max-pos':     { key:'max_positions',   min:2,     max:999,    parse:v=>v>=999?999:parseInt(v), format:v=>v>=999?'∞':v,            slider:'fader-max-pos',     sliderScale:v=>v>=999?100:v,      color:'blue'  },
+  'val-daily-loss':  { key:'daily_loss_cap',  min:5,     max:200,    parse:v=>parseFloat(v),    format:v=>'$'+parseFloat(v).toFixed(2),  slider:'fader-daily-loss',  sliderScale:v=>Math.round(v*100), color:'red'   },
+  'val-min-vol':     { key:'min_volume',      min:1,     max:100000, parse:v=>parseInt(v),       format:v=>parseInt(v).toLocaleString(), slider:'fader-min-vol',     sliderScale:v=>v,                 color:''      },
+  'val-take-profit': { key:'take_profit_pct', min:5,     max:100,    parse:v=>parseInt(v),       format:v=>v+'%',                        slider:'fader-take-profit', sliderScale:v=>v,                 color:''      },
+  'val-stop-loss':   { key:'stop_loss_pct',   min:5,     max:50,     parse:v=>parseInt(v),       format:v=>v+'%',                        slider:'fader-stop-loss',   sliderScale:v=>v,                 color:'red'   },
+  'val-edge':        { key:'min_edge_score',  min:20,    max:95,     parse:v=>parseInt(v),       format:v=>v+'',                         slider:'fader-edge',        sliderScale:v=>v,                 color:'amber' },
+  'val-scan':        { key:'scan_interval',   min:30,    max:600,    parse:v=>parseInt(v),       format:v=>v+'s',                        slider:'fader-scan',        sliderScale:v=>v,                 color:'amber' },
+};
+
+function makeFaderEditable(displayId) {
+  const cfg  = FADER_CONFIG[displayId];
+  if (!cfg) return;
+  const span = document.getElementById(displayId);
+  if (!span || span.tagName === 'INPUT') return;
+
+  // Extract raw numeric value from display text
+  const rawText = span.textContent.replace(/[^0-9.]/g, '') || '0';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = rawText;
+  input.className = 'fader-edit-input' + (cfg.color ? ' '+cfg.color : '');
+  input.id = displayId;
+
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+
+  function commit() {
+    let raw = input.value.replace(/[^0-9.]/g, '');
+    let val = cfg.parse(raw);
+    if (isNaN(val) || val === null) val = cfg.parse(rawText);
+    val = Math.max(cfg.min, Math.min(cfg.max, val));
+
+    pendingSettings[cfg.key] = val;
+
+    const newSpan = document.createElement('span');
+    newSpan.id        = displayId;
+    newSpan.className = 'fader-val' + (cfg.color ? ' '+cfg.color : '');
+    newSpan.textContent = cfg.format(val);
+    newSpan.onclick = () => makeFaderEditable(displayId);
+    input.replaceWith(newSpan);
+
+    // Sync slider
+    const slider = document.getElementById(cfg.slider);
+    if (slider) slider.value = cfg.sliderScale(val);
+  }
+
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') {
+      input.value = rawText;
+      commit();
+    }
+  });
+}
+
+// Attach click-to-edit to all fader value spans
+function attachFaderEditors() {
+  Object.keys(FADER_CONFIG).forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.onclick = () => makeFaderEditable(id);
+  });
+}
+
+// ─── Chat panel ───────────────────────────────────────────────────────────────
+let chatOpen = false;
+function toggleChat() {
+  chatOpen = !chatOpen;
+  document.getElementById('chat-panel').classList.toggle('open', chatOpen);
+  document.getElementById('btn-chat').classList.toggle('active', chatOpen);
+}
+
+function sendChat() {
+  const input = document.getElementById('chat-input');
+  const msg   = input.value.trim();
+  if (!msg) return;
+
+  appendChatMsg(msg, 'user');
+  input.value = '';
+
+  // Build context from live status
+  const ctx = {
+    pnl:       document.getElementById('stat-pnl').textContent,
+    positions: document.getElementById('stat-positions').textContent,
+    wins:      document.getElementById('stat-wins').textContent,
+    losses:    document.getElementById('stat-losses').textContent,
+    markets:   document.getElementById('stat-markets').textContent,
+    trades:    allTrades.slice(0,10),
+  };
+
+  fetch('/api/chat', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ message: msg, context: ctx })
+  }).then(r=>r.json()).then(d=>{
+    appendChatMsg(d.reply || d.message || 'No response.', 'bot');
+  }).catch(()=>{
+    appendChatMsg("Chat API not connected yet. Add ANTHROPIC_API_KEY to .env to enable.", 'bot');
+  });
+}
+
+function appendChatMsg(text, role) {
+  const wrap = document.getElementById('chat-messages');
+  const div  = document.createElement('div');
+  div.className = 'chat-msg ' + role;
+  div.innerHTML = `<div class="chat-msg-label">${role === 'bot' ? 'KK' : 'YOU'}</div>${escapeHtml(text)}`;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 // Reset filter button states
 document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
 document.getElementById('f-all').classList.add('active');
 
+attachFaderEditors();
 poll();
 setInterval(poll, 5000);
 </script>
