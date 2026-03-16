@@ -751,6 +751,24 @@
       <div class="fader-desc">How often the bot scans for new opportunities</div>
     </div>
 
+    <!-- Notification toggles -->
+    <div class="fader-strip">
+      <div class="fader-name" style="margin-bottom:10px">Notifications</div>
+      <div style="display:flex;gap:12px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="toggle-sms" onchange="pendingSettings.notify_sms=this.checked"
+                 style="accent-color:var(--green);width:14px;height:14px">
+          <span style="font-size:11px;color:var(--muted)">SMS</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="toggle-email" onchange="pendingSettings.notify_email=this.checked"
+                 style="accent-color:var(--green);width:14px;height:14px">
+          <span style="font-size:11px;color:var(--muted)">Email</span>
+        </label>
+      </div>
+      <div class="fader-desc">Requires Twilio / Gmail App Password in .env</div>
+    </div>
+
     <button id="btn-save-settings" onclick="saveSettings()">⬆ APPLY SETTINGS</button>
     <div id="save-feedback"></div>
 
@@ -957,6 +975,11 @@ function syncFaders(s) {
     document.getElementById('fader-scan').value = s.scan_interval;
     document.getElementById('val-scan').textContent = s.scan_interval + 's';
   }
+  // notification toggles
+  if (s.notify_sms !== undefined)
+    document.getElementById('toggle-sms').checked = s.notify_sms;
+  if (s.notify_email !== undefined)
+    document.getElementById('toggle-email').checked = s.notify_email;
 }
 
 // ── Positions list ────────────────────────────────────────────────────────────
