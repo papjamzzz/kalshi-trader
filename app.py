@@ -60,6 +60,12 @@ def positions():
 
 # ── Settings ──────────────────────────────────────────────────────────────────
 
+@app.route("/api/balance")
+def balance():
+    import kalshi_api as kapi
+    return jsonify({"balance": kapi.get_balance()})
+
+
 @app.route("/api/settings", methods=["GET"])
 def settings_get():
     return jsonify(engine.settings)
