@@ -271,9 +271,12 @@ class TradingEngine:
         score   = float(m.get("score", 0))
 
         if side == "yes":
-            entry_price = yes_ask  # buying YES at the ask
+            entry_price = int(round(yes_ask))   # must be whole cents for Kalshi API
         else:
-            entry_price = 100 - yes_bid  # NO price = 100 - yes_bid
+            entry_price = int(round(100 - yes_bid))
+
+        if entry_price <= 0 or entry_price >= 100:
+            return
 
         max_spend = s.get("max_spend", 10.0)
         count = kapi.contracts_for_spend(max_spend, entry_price)
@@ -310,8 +313,9 @@ class TradingEngine:
             self._status_msg = f"Entered {ticker} {side.upper()} @ {entry_price}¢"
 
         except Exception as e:
-            print(f"  ❌ Order failed: {ticker} — {e}")
-            self._status_msg = f"Order error: {ticker}"
+            import traceback
+            traceback.print_exc()
+            self._status_msg = f"Order error: {str(e)[:60]}"
 
     # ── Exit Logic ────────────────────────────────────────────────────────────
 
