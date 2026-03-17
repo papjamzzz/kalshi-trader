@@ -18,9 +18,9 @@ except ImportError:
     TWILIO_AVAILABLE = False
 
 # ── Config ────────────────────────────────────────────────────────────────────
-GMAIL_FROM    = "jeremiahstepehensmith@gmail.com"
+GMAIL_FROM    = "jeremiahstephensmith@gmail.com"
 EMAIL_TO      = "underwaterfile@proton.me"
-PHONE_TO      = "+14138345062"
+PHONE_TO      = "+12077011044"
 
 FUNNY = {
     "buy": [
