@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KK Trader — User Guide</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+  :root {
+    --bg: #05060a; --surface: #0b0d14; --card: #0f1119;
+    --border: #1c2030; --border2: #252c3d;
+    --green: #00d595; --red: #f6465d; --blue: #4c8dff; --amber: #f5a623;
+    --text: #e2e8f0; --text2: #94a3b8; --muted: #4a5568; --dim: #2d3748;
+    --mono: 'JetBrains Mono', monospace; --sans: 'Inter', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 14px; line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* NAV */
+  .nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(5,6,10,0.95); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 32px; height: 52px;
+  }
+  .nav-brand { font-size: 13px; font-weight: 800; color: var(--green); letter-spacing: 0.5px; }
+  .nav-sep { color: var(--dim); }
+  .nav-title { font-size: 13px; color: var(--text2); }
+  .nav-spacer { flex: 1; }
+  .nav-back {
+    font-size: 11px; font-weight: 600; color: var(--text2);
+    text-decoration: none; padding: 6px 14px;
+    border: 1px solid var(--border2); border-radius: 5px;
+    transition: all 0.15s;
+  }
+  .nav-back:hover { color: var(--text); border-color: var(--text2); }
+
+  /* LAYOUT */
+  .wrap { max-width: 760px; margin: 0 auto; padding: 48px 24px 80px; }
+
+  /* HERO */
+  .hero { margin-bottom: 48px; }
+  .hero-label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 2.5px;
+    text-transform: uppercase; color: var(--green); margin-bottom: 12px;
+  }
+  .hero-title { font-size: 36px; font-weight: 800; line-height: 1.15; margin-bottom: 14px; }
+  .hero-sub { font-size: 16px; color: var(--text2); line-height: 1.6; max-width: 560px; }
+
+  /* SECTION */
+  .section { margin-bottom: 48px; }
+  .section-label {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 2.5px;
+    text-transform: uppercase; color: var(--muted);
+    border-top: 1px solid var(--border); padding-top: 24px; margin-bottom: 20px;
+  }
+  h2 { font-size: 22px; font-weight: 700; margin-bottom: 12px; }
+  h3 { font-size: 16px; font-weight: 600; color: var(--text); margin: 24px 0 8px; }
+  p  { color: var(--text2); margin-bottom: 14px; }
+  p strong { color: var(--text); font-weight: 600; }
+
+  /* CALLOUT */
+  .callout {
+    border-left: 3px solid var(--green); background: rgba(0,213,149,0.05);
+    padding: 14px 18px; border-radius: 0 6px 6px 0; margin: 20px 0;
+  }
+  .callout.amber { border-color: var(--amber); background: rgba(245,166,35,0.05); }
+  .callout.red   { border-color: var(--red);   background: rgba(246,70,93,0.05); }
+  .callout.blue  { border-color: var(--blue);  background: rgba(76,141,255,0.05); }
+  .callout p { margin: 0; }
+
+  /* STEPS */
+  .steps { display: flex; flex-direction: column; gap: 16px; margin: 20px 0; }
+  .step {
+    display: grid; grid-template-columns: 32px 1fr;
+    gap: 14px; align-items: start;
+  }
+  .step-num {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--card); border: 1px solid var(--border2);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 11px; font-weight: 700;
+    color: var(--green); flex-shrink: 0;
+  }
+  .step-body { padding-top: 5px; }
+  .step-title { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .step-desc  { color: var(--text2); font-size: 13px; }
+
+  /* FADER TABLE */
+  .fader-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  .fader-table th {
+    text-align: left; padding: 8px 12px;
+    font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--border2);
+  }
+  .fader-table td {
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .fader-table tr:last-child td { border-bottom: none; }
+  .fader-name { font-weight: 600; color: var(--text); font-size: 13px; }
+  .fader-what { color: var(--text2); font-size: 12px; margin-top: 2px; }
+  .fader-rec  {
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    padding: 3px 8px; border-radius: 3px; white-space: nowrap;
+  }
+  .g { background: rgba(0,213,149,0.1);  color: var(--green); }
+  .r { background: rgba(246,70,93,0.1);  color: var(--red); }
+  .b { background: rgba(76,141,255,0.1); color: var(--blue); }
+  .a { background: rgba(245,166,35,0.1); color: var(--amber); }
+
+  /* DIAGRAM */
+  .flow {
+    display: flex; flex-direction: column; gap: 2px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; overflow: hidden; margin: 20px 0;
+  }
+  .flow-step {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+  }
+  .flow-step:last-child { border-bottom: none; }
+  .flow-icon { font-size: 16px; width: 24px; text-align: center; flex-shrink: 0; }
+  .flow-text { font-size: 13px; color: var(--text2); }
+  .flow-text strong { color: var(--text); }
+  .flow-badge {
+    margin-left: auto; font-family: var(--mono); font-size: 9px;
+    padding: 2px 7px; border-radius: 3px; flex-shrink: 0;
+  }
+
+  /* GLOSSARY */
+  .glossary { display: flex; flex-direction: column; gap: 12px; margin: 16px 0; }
+  .term { display: grid; grid-template-columns: 160px 1fr; gap: 12px; }
+  .term-word { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--green); padding-top: 1px; }
+  .term-def  { font-size: 13px; color: var(--text2); }
+
+  /* FAQ */
+  .faq { display: flex; flex-direction: column; gap: 20px; margin: 16px 0; }
+  .faq-q { font-weight: 600; color: var(--text); margin-bottom: 6px; font-size: 14px; }
+  .faq-a { color: var(--text2); font-size: 13px; }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <span class="nav-brand">KK TRADER</span>
+  <span class="nav-sep">/</span>
+  <span class="nav-title">User Guide</span>
+  <div class="nav-spacer"></div>
+  <a href="/" class="nav-back">← Back to Dashboard</a>
+</nav>
+
+<div class="wrap">
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-label">KK Trader — User Guide</div>
+    <h1 class="hero-title">How the machine works.</h1>
+    <p class="hero-sub">
+      Plain English. No jargon. Everything you need to know to run the bot,
+      tune it, and understand what it's doing with your money.
+    </p>
+  </div>
+
+
+  <!-- ══ SECTION 1 ══ -->
+  <div class="section">
+    <div class="section-label">01 — The Big Picture</div>
+    <h2>What is this thing?</h2>
+    <p>
+      KK Trader is a <strong>robot that trades prediction markets on Kalshi</strong> while you sleep.
+      Kalshi is a legal US exchange where you bet on real-world outcomes —
+      "Will the Fed raise rates?", "Will this movie hit #1?" — and get paid $1 per contract if you're right.
+    </p>
+    <p>
+      The bot watches hundreds of markets at once, finds ones that look <strong>mispriced</strong>
+      (meaning: the crowd's estimate seems off), buys in, and sells when it hits your profit target
+      or cuts the loss if it's going wrong.
+    </p>
+    <div class="callout">
+      <p><strong>The core idea:</strong> Small edges, applied many times, add up.
+      You don't need to be right 90% of the time. You need to be right more than you're wrong,
+      and let the math work over hundreds of trades.</p>
+    </div>
+  </div>
+
+
+  <!-- ══ SECTION 2 ══ -->
+  <div class="section">
+    <div class="section-label">02 — How It Makes Decisions</div>
+    <h2>The decision flow</h2>
+    <p>Every 90 seconds (adjustable), the bot runs through this exact process:</p>
+
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-icon">📡</div>
+        <div class="flow-text"><strong>Fetch markets</strong> — pulls all open Kalshi markets through KK (the scoring engine on port 5555)</div>
+        <span class="flow-badge b">~734 markets</span>
+      </div>
+      <div class="flow-step">
+        <div class="flow-icon">🔢</div>
+        <div class="flow-text"><strong>Score each market</strong> — KK runs 4 signals on every market and gives it a score from 0–100</div>
+        <span class="flow-badge g">0–100 score</span>
+      </div>
+      <div class="flow-step">
+        <div class="flow-icon">🛡️</div>
+        <div class="flow-text"><strong>Volume filter</strong> — skips any market below your Min Pool Volume. Thin pools = insiders win. We don't play.</div>
+        <span class="flow-badge r">blocks thin markets</span>
+      </div>
+      <div class="flow-step">
+        <div class="flow-icon">🎯</div>
+        <div class="flow-text"><strong>Edge filter</strong> — only keeps markets above your Min Edge Score fader</div>
+        <span class="flow-badge a">score gate</span>
+      </div>
+      <div class="flow-step">
+        <div class="flow-icon">📐</div>
+        <div class="flow-text"><strong>Direction check</strong> — YES price below 45¢ = buy YES. YES price above 55¢ = buy NO. Between 45–55¢ = skip (too uncertain).</div>
+        <span class="flow-badge g">find the side</span>
+      </div>
+      <div class="flow-step">
+        <div class="flow-icon">💸</div>
+        <div class="flow-text"><strong>Enter trade</strong> — places a limit order for as many contracts as your Max Spend budget allows</div>
+        <span class="flow-badge b">order placed</span>
+      </div>
+      <div class="flow-step">
+        <div class="flow-icon">👁️</div>
+        <div class="flow-text"><strong>Monitor</strong> — watches every open position every scan cycle for take profit or stop loss triggers</div>
+        <span class="flow-badge a">continuous</span>
+      </div>
+      <div class="flow-step">
+        <div class="flow-icon">🏁</div>
+        <div class="flow-text"><strong>Exit</strong> — closes the position when it hits your Take Profit %, Stop Loss %, or market expiry</div>
+        <span class="flow-badge g">locked in</span>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══ SECTION 3 ══ -->
+  <div class="section">
+    <div class="section-label">03 — The Faders (Your Controls)</div>
+    <h2>What every fader does</h2>
+    <p>
+      Every setting is a fader on the left panel. <strong>Click the value to type an exact number.</strong>
+      Drag the slider to adjust. Hit <em>Apply Settings</em> to save.
+    </p>
+
+    <table class="fader-table">
+      <thead>
+        <tr>
+          <th>Fader</th>
+          <th>What it controls</th>
+          <th>Safe start</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <div class="fader-name">Max Spend / Trade</div>
+            <div class="fader-what">Dollars risked per single entry</div>
+          </td>
+          <td><p style="margin:0;font-size:13px;color:var(--text2)">
+            The most the bot will spend on any one trade. At $2, it buys 4 contracts at 50¢ each.
+            It never spends more than this no matter what it finds.
+          </p></td>
+          <td><span class="fader-rec b">$2.00</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="fader-name">Max Open Positions</div>
+            <div class="fader-what">How many trades can be open at once</div>
+          </td>
+          <td><p style="margin:0;font-size:13px;color:var(--text2)">
+            Caps your exposure. At 5, if you have 5 open trades the bot stops entering new ones until one closes.
+            ∞ = no limit (slide to 100).
+          </p></td>
+          <td><span class="fader-rec b">5</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="fader-name">Daily Loss Cap</div>
+            <div class="fader-what">Maximum you're willing to lose today</div>
+          </td>
+          <td><p style="margin:0;font-size:13px;color:var(--text2)">
+            If your total losses for the day hit this number, the bot stops trading entirely until tomorrow.
+            Your hard floor. Treat it seriously.
+          </p></td>
+          <td><span class="fader-rec r">$5.00</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="fader-name">Min Pool Volume</div>
+            <div class="fader-what">Minimum contracts traded in the market</div>
+          </td>
+          <td><p style="margin:0;font-size:13px;color:var(--text2)">
+            <strong>Your most important protection.</strong> Low volume = insiders dominate = you lose.
+            High volume = price reflects real information = fair fight.
+            Set this high enough to feel safe.
+          </p></td>
+          <td><span class="fader-rec g">500+</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="fader-name">Take Profit</div>
+            <div class="fader-what">% gain that triggers an exit</div>
+          </td>
+          <td><p style="margin:0;font-size:13px;color:var(--text2)">
+            If a position gains 20%, the bot sells and locks in the profit. Set too high and you'll
+            watch winners reverse. Set too low and you leave money on the table.
+          </p></td>
+          <td><span class="fader-rec g">20%</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="fader-name">Stop Loss</div>
+            <div class="fader-what">% loss that triggers an exit</div>
+          </td>
+          <td><p style="margin:0;font-size:13px;color:var(--text2)">
+            If a position drops 15%, the bot cuts it. No hoping. No holding.
+            Small losses are fine — they protect you from big ones.
+          </p></td>
+          <td><span class="fader-rec r">15%</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="fader-name">Min Edge Score</div>
+            <div class="fader-what">KK score required to trigger a buy</div>
+          </td>
+          <td><p style="margin:0;font-size:13px;color:var(--text2)">
+            KK scores every market 0–100. This is the minimum score to qualify.
+            Higher = fewer trades but higher quality picks. Lower = more trades but lower confidence.
+          </p></td>
+          <td><span class="fader-rec a">75</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="fader-name">Scan Interval</div>
+            <div class="fader-what">Seconds between market scans</div>
+          </td>
+          <td><p style="margin:0;font-size:13px;color:var(--text2)">
+            How often the bot checks for new opportunities. 90 seconds is a good balance —
+            fast enough to catch moves, slow enough not to spam the Kalshi API.
+          </p></td>
+          <td><span class="fader-rec a">90s</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+
+  <!-- ══ SECTION 4 ══ -->
+  <div class="section">
+    <div class="section-label">04 — The Dashboard</div>
+    <h2>Reading the screen</h2>
+
+    <h3>Transport Bar (top)</h3>
+    <p>
+      The green dot = bot is alive and scanning. The status message tells you exactly what it just did.
+      <strong>START</strong> turns it on. <strong>STOP</strong> turns it off (doesn't close open trades).
+      <strong>KALSHI ↗</strong> takes you to your account. <strong>CHAT</strong> opens the AI assistant panel.
+    </p>
+
+    <h3>Metric Strip (6 numbers)</h3>
+    <p>
+      <strong>Daily P&L</strong> — your profit or loss today, updates in real time. Green = winning. Red = losing.<br>
+      <strong>Open Positions</strong> — how many trades are currently active.<br>
+      <strong>Wins / Losses</strong> — closed trades today that hit take profit vs stop loss.<br>
+      <strong>Markets Watched</strong> — how many markets KK is scoring this cycle.<br>
+      <strong>Balance</strong> — your live Kalshi account balance.
+    </p>
+
+    <h3>Daily Drawdown Bar</h3>
+    <p>
+      The thin bar under the metrics. Shows how close you are to your Daily Loss Cap.
+      Green = safe. Amber = getting close. Red = almost at the limit. Hits 100% → bot pauses automatically.
+    </p>
+
+    <h3>Session View (right panel)</h3>
+    <p>
+      Every trade the bot makes appears here as a row, newest at the top.
+      <strong>Blue left bar</strong> = buy. <strong>Green left bar</strong> = profitable close.
+      <strong>Red left bar</strong> = stop loss exit. Filter buttons let you see only wins, only losses, etc.
+    </p>
+
+    <h3>Open Positions (bottom left)</h3>
+    <p>
+      Shows every currently open trade — the ticker, how many contracts, what side (YES/NO), and entry price.
+      These are live positions on Kalshi right now.
+    </p>
+  </div>
+
+
+  <!-- ══ SECTION 5 ══ -->
+  <div class="section">
+    <div class="section-label">05 — Starting Up</div>
+    <h2>How to run it every day</h2>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <div class="step-title">Open KK (the scoring engine)</div>
+          <div class="step-desc">Double-click <strong>~/kalshi-edge/launch.command</strong> in Finder.
+          This starts port 5555 — the brain that scores all the markets.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <div class="step-title">Open KK Trader</div>
+          <div class="step-desc">Double-click <strong>~/kalshi-trader/launch.command</strong>.
+          Browser opens to localhost:5559 automatically.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <div class="step-title">Check your faders</div>
+          <div class="step-desc">Glance at the settings. Make sure Daily Loss Cap and Max Spend
+          feel right for today. Click any value to type an exact number.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <div class="step-title">Hit START</div>
+          <div class="step-desc">Green dot lights up. Bot begins scanning.
+          First trades appear in the Session View within the next few scan cycles.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <div class="step-title">Walk away</div>
+          <div class="step-desc">The machine runs itself. Check back whenever you want.
+          Hit STOP any time to pause — your open positions stay open on Kalshi until they resolve or you close them manually.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout amber" style="margin-top:24px">
+      <p><strong>Both apps need to be running.</strong> KK Trader reads market scores from KK.
+      If KK isn't running, the Trader falls back to fetching directly from Kalshi — which works, but slower.</p>
+    </div>
+  </div>
+
+
+  <!-- ══ SECTION 6 ══ -->
+  <div class="section">
+    <div class="section-label">06 — Glossary</div>
+    <h2>Words you'll see</h2>
+    <div class="glossary">
+      <div class="term"><span class="term-word">YES / NO</span><span class="term-def">The two sides of a Kalshi market. Buy YES if you think the event happens. Buy NO if you think it doesn't. Each contract pays $1 if you're right.</span></div>
+      <div class="term"><span class="term-word">Contracts</span><span class="term-def">The unit of a Kalshi trade. 1 contract = you paid X cents. If you're right, you get $1 back. The difference is your profit.</span></div>
+      <div class="term"><span class="term-word">Entry Price</span><span class="term-def">The price (in cents) the bot paid when it bought. 44¢ means each contract cost $0.44. If it wins, you get $1.00 — profit of $0.56 per contract.</span></div>
+      <div class="term"><span class="term-word">Edge Score</span><span class="term-def">KK's 0–100 rating of how mispriced a market looks. Higher = more opportunity. Calculated from time remaining, spread width, price distance from 50%, and market category.</span></div>
+      <div class="term"><span class="term-word">Take Profit</span><span class="term-def">The bot sells when your position gains this %. If you set 20% and a trade gains 20%, it exits and locks in the win.</span></div>
+      <div class="term"><span class="term-word">Stop Loss</span><span class="term-def">The bot sells when your position loses this %. Cuts the loss before it gets worse. A controlled small loss is always better than an uncontrolled big one.</span></div>
+      <div class="term"><span class="term-word">Pool Volume</span><span class="term-def">How many contracts have been traded in a market. Low volume = few participants = easier for insiders to move the price. High volume = many participants = fairer pricing.</span></div>
+      <div class="term"><span class="term-word">Daily Loss Cap</span><span class="term-def">Your daily hard limit. Once losses hit this, the bot stops for the day. Resets at midnight. The most important risk control you have.</span></div>
+      <div class="term"><span class="term-word">Session View</span><span class="term-def">The Ableton-style trade log on the right side. Every buy and sell appears as a clip row. Color-coded: blue = buy, green = win, red = stop hit.</span></div>
+    </div>
+  </div>
+
+
+  <!-- ══ SECTION 7 ══ -->
+  <div class="section">
+    <div class="section-label">07 — FAQ</div>
+    <h2>Common questions</h2>
+    <div class="faq">
+      <div>
+        <div class="faq-q">The bot keeps trading the same market over and over. Is that normal?</div>
+        <div class="faq-a">Yes, while testing. It means that market keeps passing the filters. Once you raise the Min Edge Score or Min Volume, it gets more selective and spreads trades across different markets.</div>
+      </div>
+      <div>
+        <div class="faq-q">What if I want to stop trading but keep watching?</div>
+        <div class="faq-a">Hit STOP. The bot goes idle but the dashboard stays live. Your open positions remain on Kalshi — they'll resolve on their own when the market closes.</div>
+      </div>
+      <div>
+        <div class="faq-q">How do I know if it's actually making money?</div>
+        <div class="faq-a">Watch the Daily P&L number at the top left. Green = net profit today. Also look at the Session View — green rows are wins, red rows are stops. Over time you want more green than red, and the wins bigger than the losses.</div>
+      </div>
+      <div>
+        <div class="faq-q">What happens if my computer sleeps or closes?</div>
+        <div class="faq-a">The bot stops. It only runs while the app is running on your machine. Your open Kalshi positions stay open (they live on Kalshi's servers), but no new trades will be made and no exits will be triggered until you restart.</div>
+      </div>
+      <div>
+        <div class="faq-q">How much money should I run this with?</div>
+        <div class="faq-a">Start small. $50–$100 to prove it works. Watch it for a week. If it's consistently profitable, scale up. The Max Spend fader and Daily Loss Cap are your dials — start conservative and grow into it.</div>
+      </div>
+      <div>
+        <div class="faq-q">Can I run both KK and KK Trader at the same time?</div>
+        <div class="faq-a">Yes — that's the intended setup. KK (port 5555) does the market analysis. KK Trader (port 5559) uses that analysis to trade. Run KK first, then KK Trader.</div>
+      </div>
+      <div>
+        <div class="faq-q">What's the Chat button for?</div>
+        <div class="faq-a">It opens a panel where you can ask an AI assistant about your trades, positions, and session data. Requires an Anthropic API key in your .env file to work. Once connected, it knows your live P&L and trade history.</div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══ SECTION 8 ══ -->
+  <div class="section">
+    <div class="section-label">08 — Recommended Settings</div>
+    <h2>Where to start</h2>
+    <p>These are safe starting values while you're learning how the machine behaves. Once you've watched it run for a week and it's profitable, you can scale up.</p>
+
+    <div class="callout blue">
+      <p>
+        <strong>Max Spend:</strong> $2.00 &nbsp;·&nbsp;
+        <strong>Max Positions:</strong> 5 &nbsp;·&nbsp;
+        <strong>Daily Loss Cap:</strong> $5.00<br>
+        <strong>Min Volume:</strong> 500 &nbsp;·&nbsp;
+        <strong>Take Profit:</strong> 20% &nbsp;·&nbsp;
+        <strong>Stop Loss:</strong> 15%<br>
+        <strong>Min Edge Score:</strong> 75 &nbsp;·&nbsp;
+        <strong>Scan Interval:</strong> 90s
+      </p>
+    </div>
+
+    <div class="callout amber" style="margin-top:16px">
+      <p><strong>Rule of thumb:</strong> If you're seeing too many trades, raise the edge score. If you're seeing zero trades, lower it. The sweet spot is 3–8 trades per day on these settings.</p>
+    </div>
+  </div>
+
+</div><!-- /wrap -->
+</body>
+</html>
