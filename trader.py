@@ -465,6 +465,31 @@ class TradingEngine:
                 notifier.notify_daily_limit(cap, abs(self._daily_pnl))
             self._status_msg = f"Paused — daily limit ${cap:.0f} hit"
 
+    def force_exit(self, ticker):
+        """Manually close a position immediately at current market price."""
+        with self._lock:
+            pos = self.positions.get(ticker)
+        if not pos:
+            return False, "position not found"
+        try:
+            raw = kapi.get_market(ticker)
+            yes_bid = raw.get("yes_bid", 0) if raw else 0
+            yes_ask = raw.get("yes_ask", 0) if raw else 0
+            exit_price = yes_bid if pos["side"] == "yes" else (100 - yes_ask)
+            if exit_price <= 0:
+                exit_price = pos["entry_price"]  # fallback to entry if no price
+        except Exception:
+            exit_price = pos["entry_price"]
+        self._exit_position(ticker, pos, exit_price, "manual_exit")
+        return True, f"exited {ticker} @ {exit_price}¢"
+
+    def force_exit_all(self):
+        """Close every open position immediately."""
+        tickers = list(self.positions.keys())
+        for ticker in tickers:
+            self.force_exit(ticker)
+        return len(tickers)
+
     # ── API Response Helpers ──────────────────────────────────────────────────
 
     def get_status(self):

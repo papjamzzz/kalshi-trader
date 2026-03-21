@@ -116,6 +116,16 @@ def settings_post():
     return jsonify({"ok": True})
 
 
+@app.route("/api/exit/<ticker>", methods=["POST"])
+def exit_position(ticker):
+    ok, msg = engine.force_exit(ticker.upper())
+    return jsonify({"ok": ok, "msg": msg})
+
+@app.route("/api/exit/all", methods=["POST"])
+def exit_all():
+    count = engine.force_exit_all()
+    return jsonify({"ok": True, "msg": f"closed {count} position(s)"})
+
 # ── Run ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
