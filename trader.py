@@ -23,8 +23,10 @@ import kalshi_api as kapi
 import notifier
 try:
     import cross_market
+    cross_market.start_background_fetcher()
     CROSS_MARKET_ENABLED = True
-except Exception:
+except Exception as e:
+    print(f"  ⚠ Cross-market disabled: {e}")
     CROSS_MARKET_ENABLED = False
 
 # ── Default Settings (all fader-controlled from UI) ───────────────────────────
@@ -243,9 +245,12 @@ class TradingEngine:
         if not yes_bid or not yes_ask:
             return False
 
-        # Spread sanity (max 25¢ spread — tight = efficient market finding price)
+        # Spread check — tighter spread = more liquid = faster repricing
+        # Cross-market plays: allow up to 18¢ (still efficient enough)
         spread = yes_ask - yes_bid
-        if spread > 25:
+        cross_signal = (m.get("cross_edge") or {}).get("signal")
+        max_spread = 18 if cross_signal else 25
+        if spread > max_spread:
             return False
 
         # Time to expiry — prefer longer-term positions (min 24h)

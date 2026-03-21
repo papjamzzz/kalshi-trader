@@ -1,17 +1,34 @@
 """
 Kalshi Trading API Client
 Handles all read + write operations against the Kalshi REST API.
+
+Speed notes:
+  - Module-level Session with connection pooling + keep-alive
+  - GET timeout 5s, POST timeout 7s (orders need breathing room)
+  - Exponential backoff on 429 rate-limit, linear on transient errors
 """
 
 import os
 import time
 import uuid
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from datetime import datetime
 from kalshi_auth import signed_headers
 
 BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
 API_PATH = "/trade-api/v2"
+
+# ── Persistent session — reuse TCP connections across all calls ───────────────
+_session = requests.Session()
+_adapter = HTTPAdapter(
+    pool_connections=4,
+    pool_maxsize=8,
+    max_retries=Retry(total=0),   # we handle retries manually
+)
+_session.mount("https://", _adapter)
+_session.mount("http://",  _adapter)
 
 
 def _get(path, params=None, retries=3):
@@ -19,16 +36,20 @@ def _get(path, params=None, retries=3):
     for attempt in range(retries):
         try:
             headers = signed_headers("GET", f"{API_PATH}{path}")
-            r = requests.get(url, headers=headers, params=params, timeout=10)
+            r = _session.get(url, headers=headers, params=params, timeout=5)
             if r.status_code == 429:
                 time.sleep(2 ** attempt)
                 continue
             r.raise_for_status()
             return r.json()
+        except requests.exceptions.Timeout:
+            if attempt == retries - 1:
+                raise
+            time.sleep(0.5)
         except Exception as e:
             if attempt == retries - 1:
                 raise
-            time.sleep(1.5 ** attempt)
+            time.sleep(1.0 * (attempt + 1))
     return {}
 
 
@@ -37,13 +58,20 @@ def _post(path, body, retries=2):
     for attempt in range(retries):
         try:
             headers = signed_headers("POST", f"{API_PATH}{path}")
-            r = requests.post(url, headers=headers, json=body, timeout=10)
+            r = _session.post(url, headers=headers, json=body, timeout=7)
+            if not r.ok:
+                print(f"  [API] POST {path} → {r.status_code}: {r.text[:300]}")
             r.raise_for_status()
             return r.json()
-        except Exception as e:
+        except requests.exceptions.HTTPError:
+            raise   # surface immediately — don't retry 4xx
+        except requests.exceptions.Timeout:
             if attempt == retries - 1:
                 raise
-            time.sleep(1)
+        except Exception:
+            if attempt == retries - 1:
+                raise
+            time.sleep(0.8)
     return {}
 
 
@@ -52,13 +80,13 @@ def _delete(path, retries=2):
     for attempt in range(retries):
         try:
             headers = signed_headers("DELETE", f"{API_PATH}{path}")
-            r = requests.delete(url, headers=headers, timeout=10)
+            r = _session.delete(url, headers=headers, timeout=5)
             r.raise_for_status()
             return r.json()
-        except Exception as e:
+        except Exception:
             if attempt == retries - 1:
                 raise
-            time.sleep(1)
+            time.sleep(0.8)
     return {}
 
 
@@ -68,7 +96,7 @@ def get_balance():
     """Returns available balance in cents."""
     try:
         data = _get("/portfolio/balance")
-        return data.get("balance", 0)  # in cents
+        return data.get("balance", 0)
     except Exception:
         return 0
 
@@ -105,18 +133,16 @@ def place_order(ticker, side, count, price_cents, action="buy"):
     count       : number of contracts (each pays $1 if correct)
     price_cents : price in cents (1–99)
     action      : 'buy' or 'sell'
-
-    Returns order dict or raises.
     """
     client_id = f"kkt-{uuid.uuid4().hex[:12]}"
     body = {
-        "ticker": ticker,
-        "client_order_id": client_id,
-        "type": "limit",
-        "action": action,
-        "side": side,
-        "count": int(count),
-        "yes_price": price_cents if side == "yes" else (100 - price_cents),
+        "ticker":           ticker,
+        "client_order_id":  client_id,
+        "type":             "limit",
+        "action":           action,
+        "side":             side,
+        "count":            int(count),
+        "yes_price":        price_cents if side == "yes" else (100 - price_cents),
     }
     result = _post("/portfolio/orders", body)
     return result.get("order", result)
@@ -142,7 +168,7 @@ def get_orders(status="resting"):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def contracts_for_spend(max_spend_dollars, price_cents):
-    """Calculate how many contracts to buy given a dollar budget and price."""
+    """Calculate contracts to buy given a dollar budget and price."""
     if price_cents <= 0:
         return 0
     budget_cents = int(max_spend_dollars * 100)

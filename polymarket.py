@@ -1,21 +1,27 @@
 """
 Polymarket API Client — free, no API key required.
-Pulls active prediction markets and their current odds.
+Pulls active prediction markets and their current YES probabilities.
+
+Uses a persistent session for connection reuse.
 """
 
 import json
 import requests
+from requests.adapters import HTTPAdapter
 
 GAMMA_API = "https://gamma-api.polymarket.com"
 
+_session = requests.Session()
+_session.mount("https://", HTTPAdapter(pool_connections=2, pool_maxsize=4))
 
-def get_active_markets(limit=500):
-    """Fetch active Polymarket markets."""
+
+def get_active_markets(limit=1000):
+    """Fetch active Polymarket markets. Up to 1000 for broad coverage."""
     try:
-        r = requests.get(
+        r = _session.get(
             f"{GAMMA_API}/markets",
             params={"closed": "false", "active": "true", "limit": limit},
-            timeout=12,
+            timeout=10,
         )
         if r.status_code == 200:
             return r.json()
@@ -30,7 +36,6 @@ def parse_market(raw):
     if not question:
         return None
 
-    # outcomePrices is usually a JSON-encoded list: '["0.62","0.38"]'
     outcomes = raw.get("outcomePrices", [])
     if isinstance(outcomes, str):
         try:
