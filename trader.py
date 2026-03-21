@@ -21,6 +21,11 @@ from collections import defaultdict
 
 import kalshi_api as kapi
 import notifier
+try:
+    import cross_market
+    CROSS_MARKET_ENABLED = True
+except Exception:
+    CROSS_MARKET_ENABLED = False
 
 # ── Default Settings (all fader-controlled from UI) ───────────────────────────
 DEFAULT_SETTINGS = {
@@ -164,6 +169,11 @@ class TradingEngine:
                 data = r.json()
                 markets = data if isinstance(data, list) else data.get("markets", [])
                 print(f"  📡 {len(markets)} markets from KK")
+                if CROSS_MARKET_ENABLED:
+                    try:
+                        markets = cross_market.enrich_markets(markets)
+                    except Exception as e:
+                        print(f"  ⚠ Cross-market enrichment error: {e}")
                 return markets
         except Exception:
             pass
@@ -173,10 +183,18 @@ class TradingEngine:
             from edge import get_scored_markets
             markets = get_scored_markets(max_events=80)
             print(f"  📡 {len(markets)} markets from direct Kalshi fetch")
-            return markets
         except Exception as e:
             print(f"  ⚠ Market fetch failed: {e}")
             return []
+
+        # ── Cross-market enrichment (Polymarket + sportsbooks) ────────────
+        if CROSS_MARKET_ENABLED:
+            try:
+                markets = cross_market.enrich_markets(markets)
+            except Exception as e:
+                print(f"  ⚠ Cross-market enrichment error: {e}")
+
+        return markets
 
     # ── Entry Logic ───────────────────────────────────────────────────────────
 
@@ -230,36 +248,45 @@ class TradingEngine:
         if spread > 25:
             return False
 
-        # Time to expiry — skip if expiring within 4 hours
+        # Time to expiry — prefer longer-term positions (min 24h)
         close_time = m.get("close_time") or m.get("expected_expiration_time")
         if close_time:
             try:
                 exp = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
                 from datetime import timezone
                 hours_left = (exp - datetime.now(timezone.utc)).total_seconds() / 3600
-                if hours_left < 4:
+                if hours_left < 24:
                     return False
             except Exception:
                 pass
 
-        # Direction filter — need a clear side to play
-        side = self._determine_side(yes_bid, yes_ask)
+        # Direction filter — cross-market signal can expand the entry zone
+        cross_signal = (m.get("cross_edge") or {}).get("signal")
+        side = self._determine_side(yes_bid, yes_ask, cross_signal)
         if side is None:
+            return False
+
+        # If cross-market signal contradicts our direction, skip
+        if cross_signal == "YES" and side == "no":
+            return False
+        if cross_signal == "NO" and side == "yes":
             return False
 
         return True
 
-    def _determine_side(self, yes_bid, yes_ask):
+    def _determine_side(self, yes_bid, yes_ask, cross_signal=None):
         """
-        Determine which side to buy based on price position.
-        YES < 45¢: market undervaluing YES → BUY YES
-        YES > 55¢: market overvaluing YES → BUY NO
-        45–55¢: ambiguous zone → skip
+        Determine which side to buy.
+        Base rule: YES < 45¢ → buy YES | YES > 55¢ → buy NO | 45–55¢ skip
+        With confirmed cross-market signal: expand zone to 48¢ / 52¢.
+        This catches markets where external consensus confirms a real edge
+        in the 45–50¢ range that Kalshi hasn't priced yet.
         """
-        mid = (yes_bid + yes_ask) / 2
-        if yes_ask < 45:
+        yes_ceil = 48 if cross_signal == "YES" else 45
+        no_floor = 52 if cross_signal == "NO"  else 55
+        if yes_ask < yes_ceil:
             return "yes"
-        if yes_bid > 55:
+        if yes_bid > no_floor:
             return "no"
         return None
 
