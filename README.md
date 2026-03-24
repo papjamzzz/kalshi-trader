@@ -150,3 +150,11 @@ KK Trader is built on top of [Kalshi Konnektor](https://github.com/papjamzzz/kal
 ---
 
 *Built with Claude Code.*
+
+---
+
+## Part of Creative Konsoles
+
+Built by [Creative Konsoles](https://creativekonsoles.com) — tools built using thought.
+
+**[creativekonsoles.com](https://creativekonsoles.com)** &nbsp;·&nbsp; support@creativekonsoles.com
