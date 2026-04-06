@@ -124,10 +124,22 @@ def get_event_positions():
 # ── Markets ───────────────────────────────────────────────────────────────────
 
 def get_market(ticker):
-    """Fetch live data for a single market ticker."""
+    """Fetch live data for a single market ticker.
+    Always returns yes_bid/yes_ask as integer cents regardless of API format.
+    """
     try:
         data = _get(f"/markets/{ticker}")
-        return data.get("market", {})
+        m = data.get("market", {})
+        # Kalshi v2 returns prices as dollar strings — normalise to integer cents
+        for bid_k, ask_k, bid_d, ask_d in [
+            ("yes_bid", "yes_ask", "yes_bid_dollars", "yes_ask_dollars"),
+            ("no_bid",  "no_ask",  "no_bid_dollars",  "no_ask_dollars"),
+        ]:
+            if bid_k not in m and bid_d in m:
+                m[bid_k] = int(round(float(m[bid_d] or 0) * 100))
+            if ask_k not in m and ask_d in m:
+                m[ask_k] = int(round(float(m[ask_d] or 0) * 100))
+        return m
     except Exception:
         return {}
 
