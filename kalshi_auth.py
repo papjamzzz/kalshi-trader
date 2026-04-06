@@ -6,17 +6,21 @@ Required env vars:
   KALSHI_KEY_ID          — the UUID Key ID from kalshi.com/account/profile
   KALSHI_PRIVATE_KEY_PATH — path to the .key file downloaded when you created the key
                             default: ~/kalshi.key
+
+PERF: Private key is loaded and parsed ONCE at module import time, not on
+every API call. Eliminates 20-40 disk reads + RSA deserialisation operations
+per scan cycle (was called in signed_headers() which is called per-request).
 """
 
 import os
 import time
 import base64
-from datetime import datetime
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
 
+# ── Load key once at import time ──────────────────────────────────────────────
 
 def _load_key():
     key_path = os.getenv(
@@ -34,9 +38,13 @@ def _load_key():
         )
 
 
-def _sign(private_key, text: str) -> str:
+# Module-level singleton — parse once, reuse forever
+_PRIVATE_KEY = _load_key()
+
+
+def _sign(text: str) -> str:
     message = text.encode("utf-8")
-    signature = private_key.sign(
+    signature = _PRIVATE_KEY.sign(
         message,
         padding.PSS(
             mgf=padding.MGF1(hashes.SHA256()),
@@ -64,9 +72,7 @@ def signed_headers(method: str, path: str) -> dict:
 
     ts_ms = str(int(time.time() * 1000))
     msg   = ts_ms + method.upper() + clean_path
-
-    private_key = _load_key()
-    sig = _sign(private_key, msg)
+    sig   = _sign(msg)
 
     return {
         "KALSHI-ACCESS-KEY":       key_id,

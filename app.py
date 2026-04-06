@@ -5,6 +5,8 @@ Port 5559 | 127.0.0.1 only
 
 import os
 import sys
+import secrets
+from functools import wraps
 from flask import Flask, jsonify, render_template, request
 from dotenv import load_dotenv
 
@@ -19,6 +21,23 @@ from trader import TradingEngine
 app = Flask(__name__)
 engine = TradingEngine()
 
+# ── Local API token — generated fresh each startup ────────────────────────────
+# Prevents any other local process from calling control endpoints.
+# The dashboard receives this token via /api/token (GET, no auth required)
+# and includes it in all subsequent POST requests as X-KK-Token.
+_LOCAL_TOKEN = secrets.token_hex(16)
+
+
+def _require_token(f):
+    """Decorator: require X-KK-Token header on mutating endpoints."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get("X-KK-Token", "")
+        if token != _LOCAL_TOKEN:
+            return jsonify({"ok": False, "error": "unauthorized"}), 403
+        return f(*args, **kwargs)
+    return decorated
+
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
 
@@ -31,15 +50,25 @@ def guide():
     return render_template("guide.html")
 
 
+# ── Auth handshake — dashboard calls this on load ─────────────────────────────
+
+@app.route("/api/token")
+def get_token():
+    """Returns the session token so the dashboard can auth its POST requests."""
+    return jsonify({"token": _LOCAL_TOKEN})
+
+
 # ── Bot Control ───────────────────────────────────────────────────────────────
 
 @app.route("/api/bot/start", methods=["POST"])
+@_require_token
 def bot_start():
     engine.start()
     return jsonify({"ok": True, "status": "started"})
 
 
 @app.route("/api/bot/stop", methods=["POST"])
+@_require_token
 def bot_stop():
     engine.stop()
     return jsonify({"ok": True, "status": "stopped"})
@@ -77,7 +106,10 @@ def chat():
 
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
+        # Re-use module-level client if already created — avoid rebuilding per request
+        if not hasattr(chat, "_client"):
+            chat._client = anthropic.Anthropic(api_key=api_key)
+        client = chat._client
         system = (
             "You are KK, an AI assistant embedded in KK Trader — an autonomous Kalshi prediction market trading bot. "
             "You have access to the user's live session data. Be concise, sharp, and direct. "
@@ -110,6 +142,7 @@ def settings_get():
 
 
 @app.route("/api/settings", methods=["POST"])
+@_require_token
 def settings_post():
     data = request.get_json(force=True)
     engine.update_settings(data)
@@ -117,14 +150,18 @@ def settings_post():
 
 
 @app.route("/api/exit/<ticker>", methods=["POST"])
+@_require_token
 def exit_position(ticker):
     ok, msg = engine.force_exit(ticker.upper())
     return jsonify({"ok": ok, "msg": msg})
 
+
 @app.route("/api/exit/all", methods=["POST"])
+@_require_token
 def exit_all():
     count = engine.force_exit_all()
     return jsonify({"ok": True, "msg": f"closed {count} position(s)"})
+
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 

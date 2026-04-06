@@ -16,6 +16,7 @@ import time
 import threading
 import uuid
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, date
 from collections import defaultdict
 
@@ -60,11 +61,17 @@ class TradingEngine:
         self._last_scan  = None
         self._last_scan_count = 0
         self._status_msg = "Idle"
+        self._last_error = None   # UX: persists until next successful scan
 
         # FIX Bug 2: cooldown after stop-loss — ticker → timestamp of last SL exit
         # No re-entry within STOP_COOLDOWN_HOURS after a stop loss
         self._stopped_out = {}  # type: dict
         STOP_COOLDOWN_HOURS = 24
+
+        # UX: skip-reason counters — surfaced in status so operator knows WHY
+        # the bot scanned N markets and entered 0 positions
+        self._last_skip_reasons = {}   # e.g. {"no_cross_signal": 12, "price_floor": 3}
+        self._last_entries_count = 0
 
         # FIX Bug 7: rebuild daily P&L/wins/losses from trades.json on every startup
         # so the daily loss cap survives restarts
@@ -166,6 +173,7 @@ class TradingEngine:
                     # FIX Bug 1: track tickers entered THIS cycle so _monitor_positions
                     # doesn't immediately stop-loss them on bid-ask spread in same cycle
                     self._this_cycle_entries = set()
+                    self._last_error = None   # clear stale errors on each clean scan cycle
                     markets = self._fetch_markets()
                     self._last_scan = datetime.now().isoformat()
                     self._last_scan_count = len(markets)
@@ -203,41 +211,50 @@ class TradingEngine:
         "KXNBATOTAL", "KXMLBTOTAL", "KXNHLTOTAL",
     ]
 
+    def _fetch_one_series(self, series):
+        """Fetch a single sports series from Kalshi. Called in parallel."""
+        try:
+            data = kapi._get("/markets", params={
+                "limit": 100,
+                "status": "open",
+                "series_ticker": series,
+            })
+            raw = data.get("markets", [])
+            results = []
+            for m in raw:
+                ya  = round(float(m.get("yes_ask_dollars") or 0) * 100)
+                yb  = round(float(m.get("yes_bid_dollars") or 0) * 100)
+                vol = round(float(m.get("volume_fp") or 0))
+                if ya == 0 and yb == 0:
+                    continue
+                results.append({
+                    "ticker":       m.get("ticker", ""),
+                    "event_ticker": m.get("event_ticker", ""),
+                    "title":        m.get("title", ""),
+                    "yes_ask":      ya,
+                    "yes_bid":      yb,
+                    "volume":       vol,
+                    "score":        70,
+                    "close_time":   m.get("close_time") or m.get("expected_expiration_time"),
+                    "category":     "Sports",
+                })
+            return results
+        except Exception as e:
+            print(f"  ⚠ Sports fetch error ({series}): {e}")
+            return []
+
     def _fetch_sports_direct(self):
         """
-        Fetch MLB, NBA, NHL markets directly from Kalshi by series_ticker.
-        Normalises price fields to the same format the rest of the bot expects.
+        Fetch all sports series in PARALLEL via ThreadPoolExecutor.
+        Serial fetching of 9 series × ~1s each = up to 9s blocking the scan loop.
+        Parallel fetching completes in ~1s regardless of series count.
         """
         all_markets = []
-        for series in self.SPORTS_SERIES:
-            try:
-                data = kapi._get("/markets", params={
-                    "limit": 100,
-                    "status": "open",
-                    "series_ticker": series,
-                })
-                raw = data.get("markets", [])
-                for m in raw:
-                    # Normalise dollar-string prices → integer cents
-                    ya = round(float(m.get("yes_ask_dollars") or 0) * 100)
-                    yb = round(float(m.get("yes_bid_dollars") or 0) * 100)
-                    vol = round(float(m.get("volume_fp") or 0))
-                    if ya == 0 and yb == 0:
-                        continue   # no orderbook yet — skip
-                    all_markets.append({
-                        "ticker":        m.get("ticker", ""),
-                        "event_ticker":  m.get("event_ticker", ""),
-                        "title":         m.get("title", ""),
-                        "yes_ask":       ya,
-                        "yes_bid":       yb,
-                        "volume":        vol,
-                        "score":         70,   # base score — cross-market enrichment can raise this
-                        "close_time":    m.get("close_time") or m.get("expected_expiration_time"),
-                        "category":      "Sports",
-                    })
-            except Exception as e:
-                print(f"  ⚠ Direct sports fetch error ({series}): {e}")
-        print(f"  ⚽ {len(all_markets)} sports markets fetched directly")
+        with ThreadPoolExecutor(max_workers=len(self.SPORTS_SERIES)) as pool:
+            futures = {pool.submit(self._fetch_one_series, s): s for s in self.SPORTS_SERIES}
+            for f in as_completed(futures):
+                all_markets.extend(f.result())
+        print(f"  ⚽ {len(all_markets)} sports markets fetched (parallel)")
         return all_markets
 
     def _fetch_markets(self):
@@ -304,24 +321,31 @@ class TradingEngine:
         MAX_PER_EVENT = 2
         event_entries = {}
 
+        skip_reasons = {}
         entries_this_scan = 0
         for m in markets:
             if len(self.positions) >= max_pos:
                 break
-            # Re-check balance before each order (we're spending as we go)
             if available < max_spend:
                 print(f"  ⚠ Balance depleted (${available:.2f}), stopping entries")
                 break
-            # Event diversification guard — max 2 positions per event
             event = m.get("event_ticker", m.get("ticker", "")[:20])
             if event_entries.get(event, 0) >= MAX_PER_EVENT:
+                skip_reasons["event_cap"] = skip_reasons.get("event_cap", 0) + 1
                 continue
-            if self._should_enter(m, s):
+            if self._should_enter(m, s, skip_reasons=skip_reasons):
                 self._enter_position(m, s)
-                available -= max_spend   # pessimistic reserve so we don't over-commit
+                available -= max_spend
                 event_entries[event] = event_entries.get(event, 0) + 1
                 entries_this_scan += 1
-                time.sleep(0.5)  # rate limit breathing room
+                time.sleep(0.5)
+
+        # Store skip reasons for dashboard visibility
+        self._last_skip_reasons = skip_reasons
+        self._last_entries_count = entries_this_scan
+        if entries_this_scan == 0 and skip_reasons:
+            top = max(skip_reasons, key=skip_reasons.get)
+            self._status_msg = f"Scanning — top skip: {top} ({skip_reasons[top]})"
 
     # Game-level markets only — NOT season-long futures (KXNBA-26-PHI etc.)
     # KXNBAGAME, KXMLBGAME, KXNHLGAME = individual game markets
@@ -336,73 +360,74 @@ class TradingEngine:
 
     STOP_COOLDOWN_HOURS = 24   # hours before re-entering a ticker that was stopped out
 
-    def _should_enter(self, m, s):
-        """Multi-signal entry filter. ALL conditions must pass."""
+    def _should_enter(self, m, s, skip_reasons=None):
+        """
+        Multi-signal entry filter. ALL conditions must pass.
+        skip_reasons: optional dict to accumulate why markets were rejected —
+                      surfaced in get_status() so operator can see 'why no entries'.
+        """
+        def reject(reason):
+            if skip_reasons is not None:
+                skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+            return False
 
         ticker = m.get("ticker", "")
         if not ticker:
-            return False
+            return reject("no_ticker")
 
         # Game-level only — block season-long futures like KXNBA-26-PHI
         if not any(ticker.startswith(p) for p in self.SPORTS_PREFIXES):
-            return False
+            return reject("not_game_market")
 
         # Already in this market
         if ticker in self.positions:
-            return False
+            return reject("already_held")
 
         # FIX Bug 2: cooldown after stop-loss — block re-entry for 24h
         stopped_at = self._stopped_out.get(ticker)
         if stopped_at:
             hours_since = (time.time() - stopped_at) / 3600
             if hours_since < self.STOP_COOLDOWN_HOURS:
-                return False
+                return reject("stop_loss_cooldown")
             else:
-                del self._stopped_out[ticker]  # cooldown expired, clear it
+                del self._stopped_out[ticker]
 
-        # FIX Bug 6: require confirmed cross-market signal — base score of 70
-        # applies to every sports market so without this guard the bot buys
-        # everything. Only enter when Polymarket or sportsbooks confirm a gap.
+        # FIX Bug 6: require confirmed cross-market signal
         ce = m.get("cross_edge") or {}
         if ce.get("bonus", 0) == 0:
-            return False
-        # Cross-market signal must exist and be consistent
+            return reject("no_cross_signal")
         cross_signal = ce.get("signal")
         if cross_signal not in ("YES", "NO"):
-            return False
+            return reject("conflicted_cross_signal")
 
-        # Edge score check (now meaningful because cross-market bonus is required)
+        # Edge score check
         score = float(m.get("score", 0))
         if score < s.get("min_edge_score", 65):
-            return False
+            return reject("edge_score_low")
 
-        # Volume check (liquidity guard — insider protection)
+        # Volume check
         volume = int(m.get("volume", 0))
-        if volume < s.get("min_volume", 5000):
-            return False
+        if volume < s.get("min_volume", 500):
+            return reject("low_volume")
 
         # Price data
         yes_bid = m.get("yes_bid", 0)
         yes_ask = m.get("yes_ask", 0)
         if not yes_bid or not yes_ask:
-            return False
+            return reject("no_price_data")
 
-        # FIX Bug 3+4: minimum price floor — stop-loss math breaks on penny markets
-        # because integer prices mean the first tick is a 50% loss not 18%.
-        # Compute the entry price for the side we'd likely take:
-        #   cross_signal YES → we'd buy YES @ yes_ask
-        #   cross_signal NO  → we'd buy NO  @ (100 - yes_bid)
+        # FIX Bug 3+4: minimum price floor
         likely_entry = yes_ask if cross_signal == "YES" else (100 - yes_bid)
         if likely_entry < 15:
-            return False
+            return reject("price_below_floor")
 
-        # Spread check — tighter = more liquid = faster repricing
+        # Spread check
         spread = yes_ask - yes_bid
         max_spread = 18 if cross_signal else 25
         if spread > max_spread:
-            return False
+            return reject("spread_too_wide")
 
-        # Time to expiry — game markets only, must have > 2h remaining
+        # Time to expiry
         close_time = m.get("close_time") or m.get("expected_expiration_time")
         if close_time:
             try:
@@ -410,18 +435,18 @@ class TradingEngine:
                 from datetime import timezone
                 hours_left = (exp - datetime.now(timezone.utc)).total_seconds() / 3600
                 if hours_left < 2:
-                    return False
+                    return reject("expiring_soon")
             except Exception:
                 pass
 
         # Direction — must align with cross-market signal
         side = self._determine_side(yes_bid, yes_ask, cross_signal)
         if side is None:
-            return False
+            return reject("no_direction")
         if cross_signal == "YES" and side != "yes":
-            return False
+            return reject("direction_mismatch")
         if cross_signal == "NO" and side != "no":
-            return False
+            return reject("direction_mismatch")
 
         return True
 
@@ -615,11 +640,15 @@ class TradingEngine:
                         s2 = kapi.get_order_status(order_id2)
                         exit_filled = s2.get("status") == "executed"
                     if not exit_filled:
-                        print(f"  ⚠ Exit order RESTING unfilled: {ticker} — check Kalshi manually")
+                        msg = f"Exit order RESTING unfilled: {ticker} — check Kalshi"
+                        print(f"  ⚠ {msg}")
+                        self._last_error = msg   # UX: persists on dashboard until cleared
             else:
                 exit_filled = True  # no order_id = likely executed inline
         except Exception as e:
-            print(f"  ⚠ Exit order error: {ticker} — {e}")
+            err_msg = f"Exit order error: {ticker} — {str(e)[:80]}"
+            print(f"  ⚠ {err_msg}")
+            self._last_error = err_msg
 
         with self._lock:
             self._daily_pnl += pnl_dollars
@@ -733,31 +762,79 @@ class TradingEngine:
     # ── API Response Helpers ──────────────────────────────────────────────────
 
     def get_status(self):
+        # Build positions list with live unrealized P&L
         positions_list = []
         for ticker, pos in self.positions.items():
+            entry = pos["entry_price"]
+            side  = pos["side"]
+            count = pos["count"]
+            # Fetch current price for unrealized P&L — non-blocking, cached by session
+            try:
+                raw = kapi.get_market(ticker)
+                yes_bid = raw.get("yes_bid", entry)
+                yes_ask = raw.get("yes_ask", entry)
+                current = yes_bid if side == "yes" else (100 - yes_ask)
+            except Exception:
+                current = entry
+            unreal_pnl = round(((current - entry) * count) / 100.0, 4)
+            unreal_pct = round(kapi.pnl_pct(entry, current), 1) if entry > 0 else 0
+
             positions_list.append({
-                "ticker":      ticker,
-                "side":        pos["side"],
-                "count":       pos["count"],
-                "entry_price": pos["entry_price"],
-                "entry_cost":  pos["entry_cost"],
-                "entry_time":  pos["entry_time"],
-                "edge_score":  pos.get("edge_score", 0),
-                "title":       pos.get("title", ticker),
+                "ticker":       ticker,
+                "side":         side,
+                "count":        count,
+                "entry_price":  entry,
+                "entry_cost":   pos["entry_cost"],
+                "entry_time":   pos["entry_time"],
+                "edge_score":   pos.get("edge_score", 0),
+                "title":        pos.get("title", ticker),
+                "current_price": current,
+                "unreal_pnl":   unreal_pnl,
+                "unreal_pct":   unreal_pct,
             })
 
+        # Cooldown list — tickers blocked from re-entry and how long until clear
+        now = time.time()
+        cooldowns = []
+        for ticker, ts in list(self._stopped_out.items()):
+            hours_left = self.STOP_COOLDOWN_HOURS - (now - ts) / 3600
+            if hours_left > 0:
+                cooldowns.append({"ticker": ticker, "hours_left": round(hours_left, 1)})
+            else:
+                del self._stopped_out[ticker]
+
+        # Cross-market data freshness (from cross_market module)
+        cm_freshness = {}
+        try:
+            import cross_market
+            age_pm   = round((now - cross_market._pm_ts)   / 60, 1) if cross_market._pm_ts   else None
+            age_odds = round((now - cross_market._odds_ts) / 60, 1) if cross_market._odds_ts else None
+            cm_freshness = {
+                "polymarket_age_min":  age_pm,
+                "sportsbook_age_min":  age_odds,
+                "polymarket_count":    len(cross_market._pm_markets),
+                "sportsbook_count":    len(cross_market._odds_events),
+            }
+        except Exception:
+            pass
+
         return {
-            "running":         self.running,
-            "status_msg":      self._status_msg,
-            "daily_pnl":       round(self._daily_pnl, 4),
-            "daily_limit_hit": self._daily_limit_hit(),
-            "wins":            self._wins,
-            "losses":          self._losses,
-            "open_positions":  positions_list,
-            "position_count":  len(self.positions),
-            "last_scan":       self._last_scan,
-            "market_count":    self._last_scan_count,
-            "settings":        self.settings,
+            "running":          self.running,
+            "status_msg":       self._status_msg,
+            "last_error":       self._last_error,
+            "daily_pnl":        round(self._daily_pnl, 4),
+            "daily_limit_hit":  self._daily_limit_hit(),
+            "wins":             self._wins,
+            "losses":           self._losses,
+            "open_positions":   positions_list,
+            "position_count":   len(self.positions),
+            "last_scan":        self._last_scan,
+            "market_count":     self._last_scan_count,
+            "settings":         self.settings,
+            "skip_reasons":     self._last_skip_reasons,
+            "last_entries":     self._last_entries_count,
+            "cooldowns":        cooldowns,
+            "cross_market":     cm_freshness,
         }
 
     def get_trades(self):

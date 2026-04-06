@@ -476,6 +476,73 @@
   .pos-pill.no  { background: var(--red-dim);   color: var(--red);   border: 1px solid rgba(246,70,93,0.15); }
   .pos-empty { padding: 16px; text-align: center; font-size: 11px; color: var(--muted); }
 
+  /* Per-position exit button */
+  .pos-exit-btn {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid rgba(246,70,93,0.3);
+    background: transparent;
+    color: var(--red);
+    cursor: pointer;
+    font-family: var(--mono);
+    transition: all 0.12s;
+    margin-left: 6px;
+    flex-shrink: 0;
+  }
+  .pos-exit-btn:hover { background: var(--red-dim); }
+
+  /* Unrealized P&L on position rows */
+  .pos-pnl { font-family: var(--mono); font-size: 9px; margin-top: 2px; }
+  .pos-pnl.win  { color: var(--green); }
+  .pos-pnl.loss { color: var(--red); }
+  .pos-pnl.flat { color: var(--muted); }
+
+  /* Error bar — persists until next clean scan */
+  .error-bar {
+    display: none;
+    background: rgba(246,70,93,0.08);
+    border-bottom: 1px solid rgba(246,70,93,0.25);
+    padding: 5px 20px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--red);
+    letter-spacing: 0.3px;
+  }
+  .error-bar.visible { display: block; }
+
+  /* Skip reasons + cooldown diagnostic panel */
+  .diag-section {
+    padding: 10px 16px 6px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .diag-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .diag-rows { display: flex; flex-direction: column; gap: 3px; }
+  .diag-row  { display: flex; justify-content: space-between; align-items: center; }
+  .diag-key  { font-family: var(--mono); font-size: 9px; color: var(--text2); }
+  .diag-val  { font-family: var(--mono); font-size: 9px; color: var(--amber); font-weight: 700; }
+  .diag-val.good { color: var(--green); }
+  .diag-val.bad  { color: var(--red); }
+
+  /* Cross-market freshness chip */
+  .cm-fresh-row {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px;
+  }
+  .cm-chip {
+    font-family: var(--mono); font-size: 8px; padding: 1px 5px;
+    border-radius: 3px; border: 1px solid var(--border); color: var(--muted);
+  }
+  .cm-chip.stale { color: var(--amber); border-color: rgba(243,186,47,0.3); }
+  .cm-chip.dead  { color: var(--red);   border-color: rgba(246,70,93,0.3); }
+
   /* ══════════════════════════════════════════════════════
      RIGHT PANEL — SESSION VIEW
   ══════════════════════════════════════════════════════ */
@@ -625,6 +692,7 @@
   .reason-badge.take_profit  { background: var(--green-dim); color: var(--green); }
   .reason-badge.stop_loss    { background: var(--red-dim);   color: var(--red); }
   .reason-badge.expiry_exit  { background: var(--amber-dim); color: var(--amber); }
+  .reason-badge.manual_exit  { background: rgba(180,180,180,0.1); color: var(--text2); border: 1px solid rgba(180,180,180,0.2); }
   .reason-badge.buy          { background: var(--blue-dim);  color: var(--blue); }
 
   /* Empty state */
@@ -821,6 +889,9 @@
           onclick="window.open('/guide','_blank')" style="color:var(--text2);border-color:var(--border2)">Guide</button>
   <button class="t-btn" id="btn-chat" onclick="toggleChat()">Chat</button>
 </header>
+
+<!-- Error bar — shows persistent errors until next successful scan -->
+<div class="error-bar" id="error-bar">⚠ <span id="error-bar-text"></span></div>
 
 <!-- ════════════════════════════════════════════
      CHAT PANEL
@@ -1045,6 +1116,15 @@
       </div>
     </div>
 
+    <!-- Diagnostics: why no entries + cross-market freshness + cooldowns -->
+    <div class="diag-section" id="diag-section">
+      <div class="diag-label">Scan Diagnostics</div>
+      <div class="diag-rows" id="diag-rows">
+        <div class="diag-row"><span class="diag-key">Waiting for first scan…</span></div>
+      </div>
+      <div class="cm-fresh-row" id="cm-fresh-row"></div>
+    </div>
+
   </div><!-- /left-panel -->
 
   <!-- ─── RIGHT: SESSION VIEW ─── -->
@@ -1087,6 +1167,20 @@
 let pendingSettings = {};
 let currentFilter   = 'all';
 let allTrades       = [];
+let _kkToken        = '';   // session token — fetched at boot, required on all POSTs
+
+// ─── Token handshake — called once at boot ────────────────────────────────────
+async function fetchToken() {
+  try {
+    const r = await fetch('/api/token');
+    const d = await r.json();
+    _kkToken = d.token || '';
+  } catch(e) { _kkToken = ''; }
+}
+
+function authHeaders() {
+  return { 'Content-Type': 'application/json', 'X-KK-Token': _kkToken };
+}
 
 // ─── Faders ───────────────────────────────────────────────────────────────────
 function updateFader(key, value, displayId, fmt, color) {
@@ -1103,7 +1197,7 @@ function updateFaderPos(raw) {
 function saveSettings() {
   fetch('/api/settings', {
     method: 'POST',
-    headers: {'Content-Type':'application/json'},
+    headers: authHeaders(),
     body: JSON.stringify(pendingSettings)
   }).then(r => r.json()).then(() => {
     const el = document.getElementById('save-feedback');
@@ -1116,14 +1210,14 @@ function saveSettings() {
 }
 
 // ─── Bot control ──────────────────────────────────────────────────────────────
-function startBot() { fetch('/api/bot/start',{method:'POST'}).then(()=>poll()); }
-function stopBot()  { fetch('/api/bot/stop', {method:'POST'}).then(()=>poll()); }
+function startBot() { fetch('/api/bot/start',{method:'POST',headers:authHeaders()}).then(()=>poll()); }
+function stopBot()  { fetch('/api/bot/stop', {method:'POST',headers:authHeaders()}).then(()=>poll()); }
 function sellAll() {
   if (!confirm('Sell ALL open positions at market price?')) return;
   const btn = document.getElementById('btn-sell-all');
   btn.textContent = '⏳ Selling…';
   btn.disabled = true;
-  fetch('/api/exit/all', {method:'POST'})
+  fetch('/api/exit/all', {method:'POST', headers:authHeaders()})
     .then(r => r.json())
     .then(d => {
       btn.textContent = '⚡ Sell All';
@@ -1132,6 +1226,14 @@ function sellAll() {
       poll();
     })
     .catch(() => { btn.textContent = '⚡ Sell All'; btn.disabled = false; });
+}
+
+function exitOne(ticker) {
+  if (!confirm(`Exit ${ticker} at market price?`)) return;
+  fetch(`/api/exit/${encodeURIComponent(ticker)}`, {method:'POST', headers:authHeaders()})
+    .then(r=>r.json())
+    .then(d => { poll(); })
+    .catch(()=>{});
 }
 
 // ─── Poll ─────────────────────────────────────────────────────────────────────
@@ -1194,8 +1296,60 @@ function updateUI(d) {
   // Sync faders
   if (Object.keys(pendingSettings).length === 0 && d.settings) syncFaders(d.settings);
 
+  // Error bar
+  const errBar = document.getElementById('error-bar');
+  if (d.last_error) {
+    document.getElementById('error-bar-text').textContent = d.last_error;
+    errBar.classList.add('visible');
+  } else {
+    errBar.classList.remove('visible');
+  }
+
+  // Diagnostics panel — skip reasons, cross-market freshness, cooldowns
+  updateDiagnostics(d);
+
   // Positions
   renderPositions(d.open_positions || []);
+}
+
+function updateDiagnostics(d) {
+  const rows = document.getElementById('diag-rows');
+  const cm   = document.getElementById('cm-fresh-row');
+  const sr   = d.skip_reasons || {};
+  const cd   = d.cooldowns    || [];
+  const cmf  = d.cross_market || {};
+
+  // Skip reasons
+  const srKeys = Object.keys(sr).sort((a,b) => sr[b]-sr[a]);
+  let rowHtml = '';
+  if (srKeys.length === 0) {
+    const n = d.last_entries || 0;
+    rowHtml = `<div class="diag-row"><span class="diag-key">Last scan entries</span><span class="diag-val good">${n}</span></div>`;
+  } else {
+    srKeys.slice(0,6).forEach(k => {
+      const nice = k.replace(/_/g,' ');
+      rowHtml += `<div class="diag-row"><span class="diag-key">${nice}</span><span class="diag-val">${sr[k]}</span></div>`;
+    });
+  }
+  // Cooldowns
+  if (cd.length) {
+    rowHtml += `<div class="diag-row" style="margin-top:4px"><span class="diag-key" style="color:var(--red)">Cooldowns (${cd.length})</span><span class="diag-val bad">${cd.map(c=>c.ticker.split('-').slice(-1)[0]).join(', ')}</span></div>`;
+  }
+  rows.innerHTML = rowHtml;
+
+  // Cross-market freshness chips
+  let chipHtml = '';
+  if (cmf.polymarket_age_min !== null && cmf.polymarket_age_min !== undefined) {
+    const age = cmf.polymarket_age_min;
+    const cls = age > 10 ? 'dead' : age > 5 ? 'stale' : '';
+    chipHtml += `<span class="cm-chip ${cls}">PM ${age}m ago · ${cmf.polymarket_count||0}</span>`;
+  }
+  if (cmf.sportsbook_age_min !== null && cmf.sportsbook_age_min !== undefined) {
+    const age = cmf.sportsbook_age_min;
+    const cls = age > 10 ? 'dead' : age > 5 ? 'stale' : '';
+    chipHtml += `<span class="cm-chip ${cls}">Books ${age}m ago · ${cmf.sportsbook_count||0}</span>`;
+  }
+  cm.innerHTML = chipHtml;
 }
 
 function syncFaders(s) {
@@ -1233,15 +1387,25 @@ function renderPositions(positions) {
     el.innerHTML = '<div class="pos-empty">No open positions</div>';
     return;
   }
-  el.innerHTML = positions.map(p => `
+  el.innerHTML = positions.map(p => {
+    const pnl    = p.unreal_pnl || 0;
+    const pct    = p.unreal_pct || 0;
+    const pnlCls = pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'flat';
+    const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `−$${Math.abs(pnl).toFixed(2)}`;
+    const pctStr = pct >= 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`;
+    return `
     <div class="pos-row">
-      <div class="pos-left">
+      <div class="pos-left" style="flex:1;min-width:0">
         <div class="pos-ticker" title="${p.ticker}">${p.ticker}</div>
         <div class="pos-detail">${p.count}× @ ${p.entry_price}¢ · $${(p.entry_cost||0).toFixed(2)}</div>
+        <div class="pos-pnl ${pnlCls}">${pnlStr} (${pctStr}) · now ${p.current_price||'?'}¢</div>
       </div>
-      <span class="pos-pill ${p.side}">${p.side.toUpperCase()}</span>
-    </div>
-  `).join('');
+      <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+        <span class="pos-pill ${p.side}">${p.side.toUpperCase()}</span>
+        <button class="pos-exit-btn" onclick="exitOne('${p.ticker}')">✕</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 // ─── Trades ───────────────────────────────────────────────────────────────────
@@ -1438,13 +1602,16 @@ function escapeHtml(s) {
 }
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
-// Reset filter button states
 document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
 document.getElementById('f-all').classList.add('active');
 
 attachFaderEditors();
-poll();
-setInterval(poll, 5000);
+
+// Fetch session token first, then start polling
+fetchToken().then(() => {
+  poll();
+  setInterval(poll, 5000);
+});
 </script>
 </body>
 </html>
