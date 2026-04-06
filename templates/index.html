@@ -57,8 +57,10 @@
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 0;
+    gap: 6px;
     padding: 0 20px;
+    overflow-x: auto;
+    white-space: nowrap;
   }
 
   .t-logo-wrap {
@@ -812,7 +814,7 @@
   <button class="t-btn" id="btn-start" onclick="startBot()">▶&nbsp; Start</button>
   <button class="t-btn" id="btn-stop"  onclick="stopBot()">■&nbsp; Stop</button>
   <button class="t-btn" id="btn-sell-all" onclick="sellAll()"
-          style="color:var(--red);border-color:var(--red);background:var(--red-dim)">⚡ Sell All</button>
+          style="color:var(--red);border-color:var(--red);background:var(--red-dim);margin-left:6px;font-weight:700">⚡ Sell All</button>
   <button class="t-btn" id="btn-kalshi"
           onclick="window.open('https://kalshi.com','_blank')">Kalshi ↗</button>
   <button class="t-btn" id="btn-guide"
