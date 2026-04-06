@@ -561,11 +561,39 @@ class TradingEngine:
         return True, f"exited {ticker} @ {exit_price}¢"
 
     def force_exit_all(self):
-        """Close every open position immediately."""
-        tickers = list(self.positions.keys())
-        for ticker in tickers:
+        """Close every open position — checks both local tracker and live Kalshi positions."""
+        tickers = set(self.positions.keys())
+
+        # Also pull live positions from Kalshi so we catch anything from before restart
+        try:
+            live = kapi._get("/portfolio/positions")
+            for p in live.get("market_positions", []):
+                if float(p.get("position_fp", 0)) != 0:
+                    ticker = p.get("ticker", "")
+                    if ticker and ticker not in tickers:
+                        # Rebuild a minimal position dict so _exit_position can work
+                        contracts = abs(float(p.get("position_fp", 0)))
+                        side = "yes" if float(p.get("position_fp", 0)) > 0 else "no"
+                        with self._lock:
+                            self.positions[ticker] = {
+                                "ticker":      ticker,
+                                "side":        side,
+                                "count":       int(contracts),
+                                "entry_price": 50,   # unknown — use mid as fallback
+                                "entry_cost":  float(p.get("total_traded_dollars", 0)),
+                                "entry_time":  p.get("last_updated_ts", ""),
+                                "order_id":    "recovered",
+                                "edge_score":  0,
+                                "title":       ticker,
+                            }
+                        tickers.add(ticker)
+        except Exception as e:
+            print(f"  ⚠ Live position fetch error: {e}")
+
+        count = len(tickers)
+        for ticker in list(tickers):
             self.force_exit(ticker)
-        return len(tickers)
+        return count
 
     # ── API Response Helpers ──────────────────────────────────────────────────
 

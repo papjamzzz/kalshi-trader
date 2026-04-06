@@ -811,6 +811,8 @@
 
   <button class="t-btn" id="btn-start" onclick="startBot()">▶&nbsp; Start</button>
   <button class="t-btn" id="btn-stop"  onclick="stopBot()">■&nbsp; Stop</button>
+  <button class="t-btn" id="btn-sell-all" onclick="sellAll()"
+          style="color:var(--red);border-color:var(--red);background:var(--red-dim)">⚡ Sell All</button>
   <button class="t-btn" id="btn-kalshi"
           onclick="window.open('https://kalshi.com','_blank')">Kalshi ↗</button>
   <button class="t-btn" id="btn-guide"
@@ -1114,6 +1116,21 @@ function saveSettings() {
 // ─── Bot control ──────────────────────────────────────────────────────────────
 function startBot() { fetch('/api/bot/start',{method:'POST'}).then(()=>poll()); }
 function stopBot()  { fetch('/api/bot/stop', {method:'POST'}).then(()=>poll()); }
+function sellAll() {
+  if (!confirm('Sell ALL open positions at market price?')) return;
+  const btn = document.getElementById('btn-sell-all');
+  btn.textContent = '⏳ Selling…';
+  btn.disabled = true;
+  fetch('/api/exit/all', {method:'POST'})
+    .then(r => r.json())
+    .then(d => {
+      btn.textContent = '⚡ Sell All';
+      btn.disabled = false;
+      alert(d.msg || 'Done');
+      poll();
+    })
+    .catch(() => { btn.textContent = '⚡ Sell All'; btn.disabled = false; });
+}
 
 // ─── Poll ─────────────────────────────────────────────────────────────────────
 function poll() {
