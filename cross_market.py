@@ -41,7 +41,7 @@ _pm_ts        = 0.0
 _odds_ts      = 0.0
 
 REFRESH_INTERVAL = 90   # seconds between bg refreshes
-GAP_THRESHOLD    = 0.03  # minimum external-vs-kalshi prob gap to count as edge
+GAP_THRESHOLD    = 0.05  # minimum external-vs-kalshi prob gap to count as edge (3% had too many noise matches)
 
 STOP_WORDS = {
     "the","a","an","is","are","will","to","of","in","on","at","for","be","by",
@@ -71,7 +71,7 @@ def _similarity(a, b):
     return len(wa & wb) / max(len(wa), len(wb))
 
 
-def _best_match(kalshi_title, candidates, key_fn, threshold=0.28):
+def _best_match(kalshi_title, candidates, key_fn, threshold=0.35):
     """Return (best_candidate, similarity_score) or (None, 0)."""
     best, best_sim = None, 0.0
     for c in candidates:

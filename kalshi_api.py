@@ -106,8 +106,9 @@ def get_positions():
     try:
         data = _get("/portfolio/positions")
         # API returns market_positions for individual markets
+        # Kalshi v2 uses position_fp (float), not position (int)
         all_pos = data.get("market_positions", [])
-        return [p for p in all_pos if float(p.get("position", 0)) != 0]
+        return [p for p in all_pos if float(p.get("position_fp", 0)) != 0]
     except Exception:
         return []
 
@@ -168,6 +169,18 @@ def place_order(ticker, side, count, price_cents, action="buy"):
     }
     result = _post("/portfolio/orders", body)
     return result.get("order", result)
+
+
+def get_order_status(order_id):
+    """
+    Fetch status of a specific order by ID.
+    Returns order dict with 'status' field: 'resting' | 'executed' | 'canceled'
+    """
+    try:
+        data = _get(f"/portfolio/orders/{order_id}")
+        return data.get("order", {})
+    except Exception:
+        return {}
 
 
 def cancel_order(order_id):

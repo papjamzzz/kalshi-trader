@@ -31,15 +31,15 @@ except Exception as e:
 
 # ── Default Settings (all fader-controlled from UI) ───────────────────────────
 DEFAULT_SETTINGS = {
-    "max_spend":       10.00,   # $ per trade
-    "max_positions":   50,      # 0 = unlimited (stored as 999)
-    "daily_loss_cap":  50.00,   # $ before bot stops for the day
-    "min_volume":      5000,    # contracts in pool (proxy for liquidity)
-    "take_profit_pct": 25.0,    # % gain to exit
-    "stop_loss_pct":   20.0,    # % loss to exit
-    "min_edge_score":  65.0,    # KK edge score threshold (0–100)
-    "scan_interval":   90,      # seconds between scans
-    "notify_sms":      True,    # send SMS on trades
+    "max_spend":       1.00,    # $ per trade — conservative until bot proven
+    "max_positions":   5,       # tight cap while rebuilding trust
+    "daily_loss_cap":  5.00,    # $ before bot stops for the day
+    "min_volume":      500,     # contracts in pool (game markets have lower volume)
+    "take_profit_pct": 20.0,    # % gain to exit
+    "stop_loss_pct":   15.0,    # % loss to exit (tighter — exit bad trades faster)
+    "min_edge_score":  75.0,    # higher threshold — cross-market bonus must be real
+    "scan_interval":   120,     # seconds between scans
+    "notify_sms":      False,   # send SMS on trades
     "notify_email":    True,    # send email on trades
 }
 
@@ -57,12 +57,18 @@ class TradingEngine:
         self._thread     = None
         self._lock       = threading.Lock()
         self._daily_reset_date = str(date.today())
-        self._daily_pnl  = 0.0
-        self._wins       = 0
-        self._losses     = 0
         self._last_scan  = None
         self._last_scan_count = 0
         self._status_msg = "Idle"
+
+        # FIX Bug 2: cooldown after stop-loss — ticker → timestamp of last SL exit
+        # No re-entry within STOP_COOLDOWN_HOURS after a stop loss
+        self._stopped_out = {}  # type: dict
+        STOP_COOLDOWN_HOURS = 24
+
+        # FIX Bug 7: rebuild daily P&L/wins/losses from trades.json on every startup
+        # so the daily loss cap survives restarts
+        self._daily_pnl, self._wins, self._losses = self._rebuild_daily_pnl()
 
     # ── Persistence ───────────────────────────────────────────────────────────
 
@@ -90,6 +96,32 @@ class TradingEngine:
             except Exception:
                 pass
         return []
+
+    def _rebuild_daily_pnl(self):
+        """
+        FIX Bug 7: Reconstruct today's P&L from trades.json on startup.
+        Without this, restarting the bot resets the daily loss cap to 0,
+        meaning a $7 cap can be bypassed by restarting after every $6.90 loss.
+        """
+        today = str(date.today())
+        daily = 0.0
+        wins = 0
+        losses = 0
+        for t in self.trades:
+            if t.get("event") != "sell":
+                continue
+            exit_time = t.get("exit_time", "")
+            if not exit_time.startswith(today):
+                continue
+            pnl = float(t.get("pnl", 0))
+            daily += pnl
+            if pnl >= 0:
+                wins += 1
+            else:
+                losses += 1
+        if daily != 0:
+            print(f"  📊 Rebuilt daily P&L from trades: ${daily:.2f} ({wins}W/{losses}L)")
+        return daily, wins, losses
 
     def _save_trades(self):
         with open(TRADES_FILE, "w") as f:
@@ -131,6 +163,9 @@ class TradingEngine:
             try:
                 self._daily_check()
                 if not self._daily_limit_hit():
+                    # FIX Bug 1: track tickers entered THIS cycle so _monitor_positions
+                    # doesn't immediately stop-loss them on bid-ask spread in same cycle
+                    self._this_cycle_entries = set()
                     markets = self._fetch_markets()
                     self._last_scan = datetime.now().isoformat()
                     self._last_scan_count = len(markets)
@@ -299,6 +334,8 @@ class TradingEngine:
         "KXNBASTG",   "KXMLBSTG",   "KXNHLSTG",
     )
 
+    STOP_COOLDOWN_HOURS = 24   # hours before re-entering a ticker that was stopped out
+
     def _should_enter(self, m, s):
         """Multi-signal entry filter. ALL conditions must pass."""
 
@@ -310,11 +347,31 @@ class TradingEngine:
         if not any(ticker.startswith(p) for p in self.SPORTS_PREFIXES):
             return False
 
-        # Already in this market (check both local tracker and live positions)
+        # Already in this market
         if ticker in self.positions:
             return False
 
-        # Edge score check
+        # FIX Bug 2: cooldown after stop-loss — block re-entry for 24h
+        stopped_at = self._stopped_out.get(ticker)
+        if stopped_at:
+            hours_since = (time.time() - stopped_at) / 3600
+            if hours_since < self.STOP_COOLDOWN_HOURS:
+                return False
+            else:
+                del self._stopped_out[ticker]  # cooldown expired, clear it
+
+        # FIX Bug 6: require confirmed cross-market signal — base score of 70
+        # applies to every sports market so without this guard the bot buys
+        # everything. Only enter when Polymarket or sportsbooks confirm a gap.
+        ce = m.get("cross_edge") or {}
+        if ce.get("bonus", 0) == 0:
+            return False
+        # Cross-market signal must exist and be consistent
+        cross_signal = ce.get("signal")
+        if cross_signal not in ("YES", "NO"):
+            return False
+
+        # Edge score check (now meaningful because cross-market bonus is required)
         score = float(m.get("score", 0))
         if score < s.get("min_edge_score", 65):
             return False
@@ -330,41 +387,40 @@ class TradingEngine:
         if not yes_bid or not yes_ask:
             return False
 
-        # Minimum price floor — below 10¢ means stop-loss math breaks down
-        # and there's no real liquidity to exit at a meaningful price
-        if yes_ask < 10 and (100 - yes_bid) < 10:
+        # FIX Bug 3+4: minimum price floor — stop-loss math breaks on penny markets
+        # because integer prices mean the first tick is a 50% loss not 18%.
+        # Compute the entry price for the side we'd likely take:
+        #   cross_signal YES → we'd buy YES @ yes_ask
+        #   cross_signal NO  → we'd buy NO  @ (100 - yes_bid)
+        likely_entry = yes_ask if cross_signal == "YES" else (100 - yes_bid)
+        if likely_entry < 15:
             return False
 
-        # Spread check — tighter spread = more liquid = faster repricing
-        # Cross-market plays: allow up to 18¢ (still efficient enough)
+        # Spread check — tighter = more liquid = faster repricing
         spread = yes_ask - yes_bid
-        cross_signal = (m.get("cross_edge") or {}).get("signal")
         max_spread = 18 if cross_signal else 25
         if spread > max_spread:
             return False
 
-        # Time to expiry — prefer longer-term positions (min 24h)
+        # Time to expiry — game markets only, must have > 2h remaining
         close_time = m.get("close_time") or m.get("expected_expiration_time")
         if close_time:
             try:
                 exp = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
                 from datetime import timezone
                 hours_left = (exp - datetime.now(timezone.utc)).total_seconds() / 3600
-                if hours_left < 24:
+                if hours_left < 2:
                     return False
             except Exception:
                 pass
 
-        # Direction filter — cross-market signal can expand the entry zone
-        cross_signal = (m.get("cross_edge") or {}).get("signal")
+        # Direction — must align with cross-market signal
         side = self._determine_side(yes_bid, yes_ask, cross_signal)
         if side is None:
             return False
-
-        # If cross-market signal contradicts our direction, skip
-        if cross_signal == "YES" and side == "no":
+        if cross_signal == "YES" and side != "yes":
             return False
-        if cross_signal == "NO" and side == "yes":
+        if cross_signal == "NO" and side != "no":
             return False
 
         return True
@@ -427,6 +483,11 @@ class TradingEngine:
             with self._lock:
                 self.positions[ticker] = position
 
+            # FIX Bug 1: mark as entered this cycle so _monitor_positions
+            # doesn't evaluate it for stop-loss before the market can reprice
+            if hasattr(self, "_this_cycle_entries"):
+                self._this_cycle_entries.add(ticker)
+
             trade_entry = {**position, "event": "buy", "pnl": 0}
             self._record_trade(trade_entry)
 
@@ -453,6 +514,24 @@ class TradingEngine:
         price_map = {m.get("ticker"): m for m in markets if m.get("ticker")}
 
         for ticker, pos in list(self.positions.items()):
+            # FIX Bug 1: skip positions entered in this scan cycle — the bot was
+            # buying at the ask then immediately stopping out on its own spread
+            # because _monitor_positions ran before the market could reprice.
+            if hasattr(self, "_this_cycle_entries") and ticker in self._this_cycle_entries:
+                continue
+
+            # Also enforce a time-based grace period: never exit within 3 minutes
+            # of entry (handles the same problem across restarts)
+            entry_time_str = pos.get("entry_time", "")
+            if entry_time_str:
+                try:
+                    entered_at = datetime.fromisoformat(entry_time_str)
+                    secs_held = (datetime.now() - entered_at).total_seconds()
+                    if secs_held < 180:
+                        continue
+                except Exception:
+                    pass
+
             current_market = price_map.get(ticker)
 
             # Fetch fresh price if not in current scan
@@ -510,8 +589,35 @@ class TradingEngine:
         print(f"  {'🟢' if pnl_dollars >= 0 else '🔴'} EXIT: {ticker} | {reason} | "
               f"entry={entry}¢ exit={exit_price}¢ | pnl=${pnl_dollars:.2f} ({pnl_pct:.1f}%)")
 
+        # FIX Bug 2: record stop-loss cooldown so we don't re-enter the same
+        # losing market every 120 seconds until the daily cap hits
+        if reason == "stop_loss":
+            self._stopped_out[ticker] = time.time()
+
+        # FIX Bug 9: verify exit order fills — don't silently mark closed if
+        # the limit order rests unfilled in a thin market
+        exit_filled = False
         try:
-            kapi.place_order(ticker, side, count, exit_price, action="sell")
+            order = kapi.place_order(ticker, side, count, exit_price, action="sell")
+            order_id = order.get("order_id") or order.get("id", "")
+            if order_id:
+                time.sleep(2)   # give Kalshi matching engine time to fill
+                order_status = kapi.get_order_status(order_id)
+                exit_filled = order_status.get("status") == "executed"
+                if not exit_filled:
+                    # Try 3¢ lower to increase fill probability
+                    kapi.cancel_order(order_id)
+                    fire_price = max(1, exit_price - 3)
+                    order2 = kapi.place_order(ticker, side, count, fire_price, action="sell")
+                    order_id2 = order2.get("order_id") or order2.get("id", "")
+                    if order_id2:
+                        time.sleep(2)
+                        s2 = kapi.get_order_status(order_id2)
+                        exit_filled = s2.get("status") == "executed"
+                    if not exit_filled:
+                        print(f"  ⚠ Exit order RESTING unfilled: {ticker} — check Kalshi manually")
+            else:
+                exit_filled = True  # no order_id = likely executed inline
         except Exception as e:
             print(f"  ⚠ Exit order error: {ticker} — {e}")
 
@@ -592,13 +698,24 @@ class TradingEngine:
                         # Rebuild a minimal position dict so _exit_position can work
                         contracts = abs(float(p.get("position_fp", 0)))
                         side = "yes" if float(p.get("position_fp", 0)) > 0 else "no"
+                        total_traded = float(p.get("total_traded_dollars") or 0)
+
+                        # FIX Bug 8: compute real avg entry price from Kalshi data
+                        # total_traded_dollars / contracts = avg cost per contract
+                        # Multiply by 100 to convert dollars → cents
+                        if contracts > 0 and total_traded > 0:
+                            real_entry_cents = int(round((total_traded / contracts) * 100))
+                        else:
+                            real_entry_cents = 50   # last resort — logged below
+                            print(f"  ⚠ force_exit_all: no cost data for {ticker}, using 50¢ fallback")
+
                         with self._lock:
                             self.positions[ticker] = {
                                 "ticker":      ticker,
                                 "side":        side,
                                 "count":       int(contracts),
-                                "entry_price": 50,   # unknown — use mid as fallback
-                                "entry_cost":  float(p.get("total_traded_dollars", 0)),
+                                "entry_price": real_entry_cents,
+                                "entry_cost":  total_traded,
                                 "entry_time":  p.get("last_updated_ts", ""),
                                 "order_id":    "recovered",
                                 "edge_score":  0,
