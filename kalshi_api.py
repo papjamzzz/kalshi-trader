@@ -102,11 +102,21 @@ def get_balance():
 
 
 def get_positions():
-    """Returns list of open positions (non-zero only)."""
+    """Returns list of open market positions (non-zero only)."""
     try:
         data = _get("/portfolio/positions")
+        # API returns market_positions for individual markets
         all_pos = data.get("market_positions", [])
         return [p for p in all_pos if float(p.get("position", 0)) != 0]
+    except Exception:
+        return []
+
+
+def get_event_positions():
+    """Returns event-level position summary (includes realized P&L, fees, exposure)."""
+    try:
+        data = _get("/portfolio/positions")
+        return data.get("event_positions", [])
     except Exception:
         return []
 

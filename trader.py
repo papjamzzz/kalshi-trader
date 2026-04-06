@@ -160,36 +160,77 @@ class TradingEngine:
 
     # ── Market Fetching ───────────────────────────────────────────────────────
 
+    # Sports series we trade — direct Kalshi fetch by series_ticker
+    SPORTS_SERIES = ["KXNBA", "KXMLB", "KXNHL"]
+
+    def _fetch_sports_direct(self):
+        """
+        Fetch MLB, NBA, NHL markets directly from Kalshi by series_ticker.
+        Normalises price fields to the same format the rest of the bot expects.
+        """
+        all_markets = []
+        for series in self.SPORTS_SERIES:
+            try:
+                data = kapi._get("/markets", params={
+                    "limit": 100,
+                    "status": "open",
+                    "series_ticker": series,
+                })
+                raw = data.get("markets", [])
+                for m in raw:
+                    # Normalise dollar-string prices → integer cents
+                    ya = round(float(m.get("yes_ask_dollars") or 0) * 100)
+                    yb = round(float(m.get("yes_bid_dollars") or 0) * 100)
+                    vol = round(float(m.get("volume_fp") or 0))
+                    if ya == 0 and yb == 0:
+                        continue   # no orderbook yet — skip
+                    all_markets.append({
+                        "ticker":        m.get("ticker", ""),
+                        "event_ticker":  m.get("event_ticker", ""),
+                        "title":         m.get("title", ""),
+                        "yes_ask":       ya,
+                        "yes_bid":       yb,
+                        "volume":        vol,
+                        "score":         70,   # base score — cross-market enrichment can raise this
+                        "close_time":    m.get("close_time") or m.get("expected_expiration_time"),
+                        "category":      "Sports",
+                    })
+            except Exception as e:
+                print(f"  ⚠ Direct sports fetch error ({series}): {e}")
+        print(f"  ⚽ {len(all_markets)} sports markets fetched directly")
+        return all_markets
+
     def _fetch_markets(self):
         """
-        Try to get scored markets from KK first.
-        Falls back to raw Kalshi API with basic scoring.
+        Try KK first (it may score sports markets with higher signal).
+        Always supplement with a direct sports fetch so we never miss game markets.
         """
+        kk_markets = []
         try:
             r = requests.get(KK_API, timeout=8)
             if r.status_code == 200:
                 data = r.json()
-                markets = data if isinstance(data, list) else data.get("markets", [])
-                print(f"  📡 {len(markets)} markets from KK")
-                if CROSS_MARKET_ENABLED:
-                    try:
-                        markets = cross_market.enrich_markets(markets)
-                    except Exception as e:
-                        print(f"  ⚠ Cross-market enrichment error: {e}")
-                return markets
+                raw = data if isinstance(data, list) else data.get("markets", [])
+                # Only keep sports from KK
+                kk_markets = [m for m in raw if any(
+                    m.get("ticker", "").startswith(p) for p in self.SPORTS_PREFIXES
+                )]
+                if kk_markets:
+                    print(f"  📡 {len(kk_markets)} sports markets from KK")
         except Exception:
             pass
 
-        # Fallback: direct Kalshi fetch (no edge score)
-        try:
-            from edge import get_scored_markets
-            markets = get_scored_markets(max_events=80)
-            print(f"  📡 {len(markets)} markets from direct Kalshi fetch")
-        except Exception as e:
-            print(f"  ⚠ Market fetch failed: {e}")
-            return []
+        # Always do a direct sports fetch — merges with KK, deduplicates by ticker
+        direct = self._fetch_sports_direct()
+        seen = {m["ticker"] for m in kk_markets}
+        for m in direct:
+            if m["ticker"] not in seen:
+                kk_markets.append(m)
+                seen.add(m["ticker"])
 
-        # ── Cross-market enrichment (Polymarket + sportsbooks) ────────────
+        markets = kk_markets
+        print(f"  📊 {len(markets)} total sports markets to scan")
+
         if CROSS_MARKET_ENABLED:
             try:
                 markets = cross_market.enrich_markets(markets)
@@ -211,18 +252,49 @@ class TradingEngine:
             self._status_msg = f"Position limit reached ({current_pos_count})"
             return
 
+        # Check live balance before entering any positions
+        available = kapi.get_balance() / 100.0   # convert cents → dollars
+        max_spend = s.get("max_spend", 2.50)
+        if available < max_spend:
+            self._status_msg = f"Low balance (${available:.2f}) — need ${max_spend:.2f} to trade"
+            print(f"  ⚠ Skipping entries — balance ${available:.2f} < max_spend ${max_spend:.2f}")
+            return
+
+        # Track entries per event ticker to prevent over-concentration
+        MAX_PER_EVENT = 2
+        event_entries = {}
+
+        entries_this_scan = 0
         for m in markets:
             if len(self.positions) >= max_pos:
                 break
+            # Re-check balance before each order (we're spending as we go)
+            if available < max_spend:
+                print(f"  ⚠ Balance depleted (${available:.2f}), stopping entries")
+                break
+            # Event diversification guard — max 2 positions per event
+            event = m.get("event_ticker", m.get("ticker", "")[:20])
+            if event_entries.get(event, 0) >= MAX_PER_EVENT:
+                continue
             if self._should_enter(m, s):
                 self._enter_position(m, s)
+                available -= max_spend   # pessimistic reserve so we don't over-commit
+                event_entries[event] = event_entries.get(event, 0) + 1
+                entries_this_scan += 1
                 time.sleep(0.5)  # rate limit breathing room
+
+    # Sports markets we trade — MLB, NBA, NHL only
+    SPORTS_PREFIXES = ("KXMLB", "KXNBA", "KXNHL")
 
     def _should_enter(self, m, s):
         """Multi-signal entry filter. ALL conditions must pass."""
 
         ticker = m.get("ticker", "")
         if not ticker:
+            return False
+
+        # Sports-only whitelist — never trade entertainment, politics, crypto, etc.
+        if not any(ticker.startswith(p) for p in self.SPORTS_PREFIXES):
             return False
 
         # Already in this market
