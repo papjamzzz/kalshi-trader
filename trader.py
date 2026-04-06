@@ -160,8 +160,13 @@ class TradingEngine:
 
     # ── Market Fetching ───────────────────────────────────────────────────────
 
-    # Sports series we trade — direct Kalshi fetch by series_ticker
-    SPORTS_SERIES = ["KXNBA", "KXMLB", "KXNHL"]
+    # Game-level series to fetch — moneylines, spreads, totals
+    # Excludes season-long futures (KXNBA, KXMLB, KXNHL without GAME/SPREAD/TOTAL)
+    SPORTS_SERIES = [
+        "KXNBAGAME", "KXMLBGAME", "KXNHLGAME",
+        "KXNBASPREAD", "KXMLBSPREAD", "KXNHLSPREAD",
+        "KXNBATOTAL", "KXMLBTOTAL", "KXNHLTOTAL",
+    ]
 
     def _fetch_sports_direct(self):
         """
@@ -283,8 +288,16 @@ class TradingEngine:
                 entries_this_scan += 1
                 time.sleep(0.5)  # rate limit breathing room
 
-    # Sports markets we trade — MLB, NBA, NHL only
-    SPORTS_PREFIXES = ("KXMLB", "KXNBA", "KXNHL")
+    # Game-level markets only — NOT season-long futures (KXNBA-26-PHI etc.)
+    # KXNBAGAME, KXMLBGAME, KXNHLGAME = individual game markets
+    # KXNBASPREAD, KXMLBSPREAD, KXNHLSPREAD = spreads
+    # KXNBATOTAL, KXMLBTOTAL, KXNHLTOTAL = over/unders
+    SPORTS_PREFIXES = (
+        "KXNBAGAME", "KXMLBGAME", "KXNHLGAME",
+        "KXNBASPREAD", "KXMLBSPREAD", "KXNHLSPREAD",
+        "KXNBATOTAL", "KXMLBTOTAL", "KXNHLTOTAL",
+        "KXNBASTG",   "KXMLBSTG",   "KXNHLSTG",
+    )
 
     def _should_enter(self, m, s):
         """Multi-signal entry filter. ALL conditions must pass."""
@@ -293,11 +306,11 @@ class TradingEngine:
         if not ticker:
             return False
 
-        # Sports-only whitelist — never trade entertainment, politics, crypto, etc.
+        # Game-level only — block season-long futures like KXNBA-26-PHI
         if not any(ticker.startswith(p) for p in self.SPORTS_PREFIXES):
             return False
 
-        # Already in this market
+        # Already in this market (check both local tracker and live positions)
         if ticker in self.positions:
             return False
 
@@ -315,6 +328,11 @@ class TradingEngine:
         yes_bid = m.get("yes_bid", 0)
         yes_ask = m.get("yes_ask", 0)
         if not yes_bid or not yes_ask:
+            return False
+
+        # Minimum price floor — below 10¢ means stop-loss math breaks down
+        # and there's no real liquidity to exit at a meaningful price
+        if yes_ask < 10 and (100 - yes_bid) < 10:
             return False
 
         # Spread check — tighter spread = more liquid = faster repricing
