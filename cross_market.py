@@ -40,7 +40,8 @@ _odds_events  = []   # list of parsed sportsbook event dicts
 _pm_ts        = 0.0
 _odds_ts      = 0.0
 
-REFRESH_INTERVAL = 90   # seconds between bg refreshes
+REFRESH_INTERVAL      = 90      # seconds between Polymarket refreshes (free — no quota)
+ODDS_REFRESH_INTERVAL = 21600   # seconds between sportsbook refreshes (6h — 500/mo budget)
 GAP_THRESHOLD    = 0.05  # minimum external-vs-kalshi prob gap to count as edge (3% had too many noise matches)
 
 STOP_WORDS = {
@@ -117,27 +118,37 @@ def _fetch_odds():
         _odds_ts = time.time()
 
 
-def _bg_loop():
-    """Background thread: fetch both sources in parallel every REFRESH_INTERVAL."""
+def _pm_loop():
+    """Polymarket loop — free API, refresh every 90s."""
     while True:
         try:
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                f1 = pool.submit(_fetch_polymarket)
-                f2 = pool.submit(_fetch_odds)
-                wait([f1, f2], timeout=20, return_when=ALL_COMPLETED)
+            _fetch_polymarket()
         except Exception as e:
-            print(f"  [Cross/bg] error: {e}")
+            print(f"  [Cross/pm] error: {e}")
         time.sleep(REFRESH_INTERVAL)
 
 
+def _odds_loop():
+    """
+    Sportsbook odds loop — APILayer free tier: 500 req/month.
+    3 sports × fetch every 6h = ~360 calls/month. Stays under quota.
+    """
+    while True:
+        try:
+            _fetch_odds()
+        except Exception as e:
+            print(f"  [Cross/odds] error: {e}")
+        time.sleep(ODDS_REFRESH_INTERVAL)
+
+
 def start_background_fetcher():
-    """Call once at startup. Kicks off the prefetch thread."""
-    t = threading.Thread(target=_bg_loop, daemon=True, name="cross-market-bg")
-    t.start()
-    # Warm the cache immediately — don't wait 90s for first data
+    """Call once at startup. Two independent loops — different refresh rates."""
+    threading.Thread(target=_pm_loop,   daemon=True, name="cross-pm-bg").start()
+    threading.Thread(target=_odds_loop, daemon=True, name="cross-odds-bg").start()
+    # Warm both caches immediately on startup
     threading.Thread(target=_fetch_polymarket, daemon=True).start()
     threading.Thread(target=_fetch_odds,       daemon=True).start()
-    print("  [Cross] Background prefetch thread started")
+    print("  [Cross] Background prefetch threads started (PM: 90s / Odds: 6h)")
 
 
 # ── Core edge computation ─────────────────────────────────────────────────────

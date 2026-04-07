@@ -1,9 +1,13 @@
 """
-The Odds API client — aggregates DraftKings, FanDuel, BetMGM, Caesars,
-PointsBet, and 70+ sportsbooks into a single implied-probability feed.
+APILayer Odds API client — sportsbook lines for cross-market edge detection.
+Aggregates DraftKings, FanDuel, BetMGM, Caesars, and 40+ books into
+implied probabilities that the bot compares against Kalshi prices.
 
-Uses a persistent session + parallel sport fetching for minimal latency.
-Free tier: 500 req/month. Set ODDS_API_KEY in .env.
+APILayer auth: apikey header (not query param like the-odds-api.com).
+Free tier: 500 req/month. At 3 sports × ~55 fetches/month = ~165 req/month.
+
+Sports: NBA, MLB, NHL only — these are the markets we actually trade.
+Fetch cadence: controlled by cross_market.py ODDS_REFRESH_INTERVAL (6h default).
 """
 
 import os
@@ -11,17 +15,13 @@ import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
 
-BASE = "https://api.the-odds-api.com/v4"
+BASE = "https://api.apilayer.com/odds/sports"
 
+# NBA, MLB, NHL only — matches our SPORTS_SERIES in trader.py
 SPORTS = [
-    "americanfootball_nfl",
-    "americanfootball_ncaaf",
     "basketball_nba",
-    "basketball_ncaab",
     "baseball_mlb",
     "icehockey_nhl",
-    "soccer_usa_mls",
-    "mma_mixed_martial_arts",
 ]
 
 _session = requests.Session()
@@ -42,22 +42,24 @@ def american_to_prob(american_odds):
 
 
 def _fetch_sport(sport_key, key):
-    """Fetch one sport. Returns list of parsed events."""
+    """Fetch one sport from APILayer. Auth via apikey header."""
     try:
         r = _session.get(
-            f"{BASE}/sports/{sport_key}/odds/",
+            f"{BASE}/{sport_key}/odds",
+            headers={"apikey": key},
             params={
-                "apiKey":     key,
                 "markets":    "h2h",
                 "regions":    "us",
                 "oddsFormat": "american",
             },
-            timeout=8,
+            timeout=10,
         )
         if r.status_code == 200:
             return _parse_events(r.json())
-    except Exception:
-        pass
+        else:
+            print(f"  [OddsAPI] {sport_key} → {r.status_code}: {r.text[:120]}")
+    except Exception as e:
+        print(f"  [OddsAPI] {sport_key} error: {e}")
     return []
 
 
@@ -100,15 +102,17 @@ def _parse_events(raw_events):
 
 def get_all_odds():
     """
-    Pull all sports in parallel using a thread pool.
-    Dramatically faster than sequential fetching.
+    Pull NBA/MLB/NHL in parallel.
+    Called by cross_market.py background thread every ODDS_REFRESH_INTERVAL.
+    At 3 sports × ~55 fetches/month = ~165 API calls/month — well within 500.
     """
     key = get_key()
     if not key:
+        print("  [OddsAPI] No ODDS_API_KEY set")
         return []
 
     all_events = []
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         futures = {pool.submit(_fetch_sport, s, key): s for s in SPORTS}
         for fut in as_completed(futures):
             try:
@@ -116,5 +120,5 @@ def get_all_odds():
             except Exception:
                 pass
 
-    print(f"  [OddsAPI] {len(all_events)} events across {len(SPORTS)} sports")
+    print(f"  [OddsAPI] {len(all_events)} events (NBA/MLB/NHL)")
     return all_events
