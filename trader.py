@@ -30,6 +30,13 @@ except Exception as e:
     print(f"  ⚠ Cross-market disabled: {e}")
     CROSS_MARKET_ENABLED = False
 
+# ── 5i Synthesis Engine — final decision gate ─────────────────────────────────
+# Tries localhost first (if 5i is running locally), falls back to Railway.
+# Only called after all other filters pass — rare, cheap (~$0.017/call).
+_5I_LOCAL   = "http://localhost:5562/ask"
+_5I_RAILWAY = "https://web-production-94a13.up.railway.app/ask"
+_5I_ENABLED = True   # set False to disable without touching _should_enter
+
 # ── Default Settings (all fader-controlled from UI) ───────────────────────────
 DEFAULT_SETTINGS = {
     "max_spend":       1.00,    # $ per trade — conservative until bot proven
@@ -358,7 +365,76 @@ class TradingEngine:
         "KXNBASTG",   "KXMLBSTG",   "KXNHLSTG",
     )
 
-    STOP_COOLDOWN_HOURS = 24   # hours before re-entering a ticker that was stopped out
+    STOP_COOLDOWN_HOURS = 24
+    _5I_MIN_AGREE      = 3     # minimum models that must say TRADE to proceed
+
+    def _ask_5i(self, market, cross_signal, ext_prob, gap_pct, sources):
+        """
+        Final decision gate — asks 5i (5-model synthesis engine) whether this
+        trade has real edge. Returns True if ≥ _5I_MIN_AGREE models say TRADE.
+
+        Prompt is tightly structured so models answer TRADE or SKIP, not prose.
+        Tries localhost:5562 first, falls back to Railway URL.
+        Times out at 18s — scan interval is 120s so this is fine.
+        """
+        if not _5I_ENABLED:
+            return True   # bypassed — treat as approved
+
+        title    = market.get("title") or market.get("ticker", "")
+        yes_ask  = market.get("yes_ask", 50)
+        side     = "YES" if cross_signal == "YES" else "NO"
+        buy_prob = yes_ask if cross_signal == "YES" else (100 - yes_ask)
+
+        prompt = (
+            f'Kalshi prediction market: "{title}"\n'
+            f"Kalshi implied probability: {buy_prob}¢ ({buy_prob}%)\n"
+            f"External sportsbook consensus: {round(ext_prob*100)}% ({', '.join(sources)})\n"
+            f"Edge gap: {gap_pct:.1f}% — books price it higher than Kalshi\n"
+            f"Proposed trade: BUY {side}\n\n"
+            f"Is this a real edge worth trading, or likely noise?\n"
+            f"Reply with exactly one word on the first line: TRADE or SKIP. "
+            f"Then one sentence of reasoning."
+        )
+
+        body = {"prompt": prompt, "verdict": True, "models": ["claude", "gpt", "gemini", "grok", "mistral"]}
+
+        for url in [_5I_LOCAL, _5I_RAILWAY]:
+            try:
+                r = requests.post(url, json=body, timeout=18)
+                if not r.ok:
+                    continue
+                data = r.json()
+
+                # Count how many individual model responses say TRADE
+                results = data.get("results") or {}
+                trade_count = 0
+                skip_count  = 0
+                for model, text in results.items():
+                    first_word = (text or "").strip().split()[0].upper().rstrip(".,:")
+                    if first_word == "TRADE":
+                        trade_count += 1
+                    elif first_word == "SKIP":
+                        skip_count += 1
+
+                verdict = (data.get("verdict") or "").strip()
+                verdict_word = verdict.split()[0].upper().rstrip(".:,") if verdict else ""
+
+                approved = trade_count >= self._5I_MIN_AGREE
+                print(
+                    f"  🤖 5i verdict: {trade_count}✓/{skip_count}✗ models → "
+                    f"{'TRADE' if approved else 'SKIP'} | {title[:50]}"
+                )
+                if verdict:
+                    print(f"     Synthesis: {verdict[:120]}")
+                return approved
+
+            except Exception as e:
+                print(f"  ⚠ 5i unreachable ({url.split('/')[2]}): {e}")
+                continue
+
+        # Both URLs failed — fail open (don't block trade on infra issue)
+        print(f"  ⚠ 5i unavailable — proceeding without synthesis gate")
+        return True
 
     def _should_enter(self, m, s, skip_reasons=None):
         """
@@ -447,6 +523,17 @@ class TradingEngine:
             return reject("direction_mismatch")
         if cross_signal == "NO" and side != "no":
             return reject("direction_mismatch")
+
+        # ── 5i Final Gate ─────────────────────────────────────────────────────
+        # Only reached if ALL other filters passed. Asks 5 AI models whether
+        # the edge is real. Requires ≥ 3/5 to say TRADE. ~$0.017/call.
+        gaps    = [g for _, g in ce.get("gaps", [])]
+        sources = ce.get("sources", [])
+        ext_prob = (sum(abs(g) for g in gaps) / len(gaps) + yes_ask / 100) if gaps else yes_ask / 100
+        gap_pct  = abs(sum(gaps) / len(gaps)) * 100 if gaps else 0
+
+        if not self._ask_5i(m, cross_signal, ext_prob, gap_pct, sources):
+            return reject("5i_rejected")
 
         return True
 
