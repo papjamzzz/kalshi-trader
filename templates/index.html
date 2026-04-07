@@ -1155,7 +1155,7 @@
         <div class="clip-header-cell">Exit</div>
         <div class="clip-header-cell">P&L $</div>
         <div class="clip-header-cell">P&L %</div>
-        <div class="clip-header-cell">Status / Time</div>
+        <div class="clip-header-cell">Status</div>
       </div>
       <div class="empty-state" id="empty-state">
         <div class="empty-icon">⚡</div>
@@ -1506,9 +1506,9 @@ function renderTrades() {
       <div class="clip-cell mono-dim">${!isBuy && t.exit_price != null ? t.exit_price+'¢' : '—'}</div>
       <div class="clip-cell">${pnlHtml}</div>
       <div class="clip-cell">${pctHtml}</div>
-      <div class="clip-cell">
+      <div class="clip-cell" style="display:flex;flex-direction:column;gap:2px;overflow:visible;white-space:normal">
         <span class="reason-badge ${reason}">${reason.replace('_',' ').toUpperCase()}</span>
-        <span class="mono-mute" style="margin-left:7px;color:#8899aa">${timeStr}</span>
+        <span style="font-family:var(--mono);font-size:9px;color:#8899aa;line-height:1.3">${timeStr}</span>
       </div>
     `;
     wrap.appendChild(row);
