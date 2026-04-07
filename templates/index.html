@@ -890,6 +890,11 @@
   <button class="t-btn" id="btn-chat" onclick="toggleChat()">Chat</button>
 </header>
 
+<!-- Paper trading banner — bright amber, impossible to miss -->
+<div id="paper-bar" style="display:none;background:rgba(243,186,47,0.12);border-bottom:1px solid rgba(243,186,47,0.4);padding:5px 20px;font-family:var(--mono);font-size:10px;color:var(--amber);letter-spacing:0.5px;text-align:center;font-weight:700;">
+  📋 PAPER TRADING MODE — No real orders are being placed. Zero financial risk.
+</div>
+
 <!-- Error bar — shows persistent errors until next successful scan -->
 <div class="error-bar" id="error-bar">⚠ <span id="error-bar-text"></span></div>
 
@@ -1248,6 +1253,9 @@ function poll() {
 }
 
 function updateUI(d) {
+  // Paper trading banner
+  document.getElementById('paper-bar').style.display = d.paper_trading ? 'block' : 'none';
+
   // LED
   const led = document.getElementById('bot-led');
   led.className = 'led' + (d.running && !d.daily_limit_hit ? ' on' : d.daily_limit_hit ? ' paused' : '');

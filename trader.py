@@ -37,6 +37,12 @@ _5I_LOCAL   = "http://localhost:5562/ask"
 _5I_RAILWAY = "https://web-production-94a13.up.railway.app/ask"
 _5I_ENABLED = True   # set False to disable without touching _should_enter
 
+# ── Paper trading mode ────────────────────────────────────────────────────────
+# When True: all logic runs (signals, 5i votes, P&L tracking) but NO real
+# orders are sent to Kalshi. Safe to run indefinitely with zero financial risk.
+# Flip to False when the strategy is proven profitable in paper mode.
+PAPER_TRADING = True
+
 # ── Default Settings (all fader-controlled from UI) ───────────────────────────
 DEFAULT_SETTINGS = {
     "max_spend":       1.00,    # $ per trade — conservative until bot proven
@@ -575,11 +581,15 @@ class TradingEngine:
 
         actual_cost = (count * entry_price) / 100.0
 
-        print(f"  🟢 ENTERING: {ticker} | {side.upper()} | {count}x @ {entry_price}¢ | ${actual_cost:.2f} | score={score:.1f}")
+        mode_tag = "📋 PAPER" if PAPER_TRADING else "🟢 LIVE"
+        print(f"  {mode_tag} ENTERING: {ticker} | {side.upper()} | {count}x @ {entry_price}¢ | ${actual_cost:.2f} | score={score:.1f}")
 
         try:
-            order = kapi.place_order(ticker, side, count, entry_price, action="buy")
-            order_id = order.get("order_id") or order.get("id", f"sim-{uuid.uuid4().hex[:8]}")
+            if PAPER_TRADING:
+                order_id = f"paper-{uuid.uuid4().hex[:8]}"
+            else:
+                order = kapi.place_order(ticker, side, count, entry_price, action="buy")
+                order_id = order.get("order_id") or order.get("id", f"sim-{uuid.uuid4().hex[:8]}")
 
             position = {
                 "ticker":        ticker,
@@ -698,7 +708,8 @@ class TradingEngine:
         pnl_pct  = kapi.pnl_pct(entry, exit_price)
         pnl_dollars = ((exit_price - entry) * count) / 100.0
 
-        print(f"  {'🟢' if pnl_dollars >= 0 else '🔴'} EXIT: {ticker} | {reason} | "
+        mode = "📋" if PAPER_TRADING else ("🟢" if pnl_dollars >= 0 else "🔴")
+        print(f"  {mode} EXIT{'[PAPER]' if PAPER_TRADING else ''}: {ticker} | {reason} | "
               f"entry={entry}¢ exit={exit_price}¢ | pnl=${pnl_dollars:.2f} ({pnl_pct:.1f}%)")
 
         # FIX Bug 2: record stop-loss cooldown so we don't re-enter the same
@@ -710,8 +721,12 @@ class TradingEngine:
         # the limit order rests unfilled in a thin market
         exit_filled = False
         try:
-            order = kapi.place_order(ticker, side, count, exit_price, action="sell")
-            order_id = order.get("order_id") or order.get("id", "")
+            if PAPER_TRADING:
+                exit_filled = True   # paper: always "filled" instantly
+                order_id = ""
+            else:
+                order = kapi.place_order(ticker, side, count, exit_price, action="sell")
+                order_id = order.get("order_id") or order.get("id", "")
             if order_id:
                 time.sleep(2)   # give Kalshi matching engine time to fill
                 order_status = kapi.get_order_status(order_id)
@@ -907,6 +922,7 @@ class TradingEngine:
 
         return {
             "running":          self.running,
+            "paper_trading":    PAPER_TRADING,
             "status_msg":       self._status_msg,
             "last_error":       self._last_error,
             "daily_pnl":        round(self._daily_pnl, 4),
