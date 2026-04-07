@@ -1401,12 +1401,24 @@ function renderPositions(positions) {
     const pnlCls = pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'flat';
     const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `−$${Math.abs(pnl).toFixed(2)}`;
     const pctStr = pct >= 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`;
+
+    // How long have we held this position?
+    let heldStr = '';
+    if (p.entry_time) {
+      const mins = Math.floor((Date.now() - new Date(p.entry_time)) / 60000);
+      const buyTime = new Date(p.entry_time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      heldStr = mins < 60
+        ? `bought ${buyTime} · ${mins}m ago`
+        : `bought ${buyTime} · ${Math.floor(mins/60)}h ${mins%60}m ago`;
+    }
+
     return `
     <div class="pos-row">
       <div class="pos-left" style="flex:1;min-width:0">
         <div class="pos-ticker" title="${p.ticker}">${p.ticker}</div>
         <div class="pos-detail">${p.count}× @ ${p.entry_price}¢ · $${(p.entry_cost||0).toFixed(2)}</div>
         <div class="pos-pnl ${pnlCls}">${pnlStr} (${pctStr}) · now ${p.current_price||'?'}¢</div>
+        ${heldStr ? `<div class="pos-detail" style="margin-top:1px;color:var(--muted)">${heldStr}</div>` : ''}
       </div>
       <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
         <span class="pos-pill ${p.side}">${p.side.toUpperCase()}</span>
@@ -1464,8 +1476,22 @@ function renderTrades() {
         ? `<span class="pnl-win">+${t.pnl_pct.toFixed(1)}%</span>`
         : `<span class="pnl-loss">${t.pnl_pct.toFixed(1)}%</span>`);
 
-    const ts  = isBuy ? t.entry_time : t.exit_time;
-    const timeStr = ts ? new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '—';
+    // Time display: buys show entry time, sells show "bought X → sold Y (Zm)"
+    let timeStr;
+    if (isBuy) {
+      timeStr = t.entry_time
+        ? new Date(t.entry_time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})
+        : '—';
+    } else {
+      const buyT  = t.entry_time ? new Date(t.entry_time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '?';
+      const sellT = t.exit_time  ? new Date(t.exit_time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})  : '?';
+      let held = '';
+      if (t.entry_time && t.exit_time) {
+        const mins = Math.round((new Date(t.exit_time) - new Date(t.entry_time)) / 60000);
+        held = mins < 60 ? ` (${mins}m)` : ` (${Math.floor(mins/60)}h${mins%60}m)`;
+      }
+      timeStr = `${buyT} → ${sellT}${held}`;
+    }
 
     const row = document.createElement('div');
     row.className = `clip-row ${rowCls}`;
