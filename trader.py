@@ -38,6 +38,14 @@ except Exception as e:
     print(f"  ⚠ Injury scanner disabled: {e}")
     INJURY_ENABLED = False
 
+try:
+    import clv as clv_tracker
+    clv_tracker.start()
+    CLV_ENABLED = True
+except Exception as e:
+    print(f"  ⚠ CLV tracker disabled: {e}")
+    CLV_ENABLED = False
+
 # ── 5i Synthesis Engine — final decision gate ─────────────────────────────────
 # Tries localhost first (if 5i is running locally), falls back to Railway.
 # Only called after all other filters pass — rare, cheap (~$0.017/call).
@@ -688,6 +696,22 @@ class TradingEngine:
             trade_entry = {**position, "event": "buy", "pnl": 0}
             self._record_trade(trade_entry)
 
+            # CLV: record entry now, resolve closing price near market close
+            if CLV_ENABLED:
+                inj = m.get("injury_signal", {})
+                if inj.get("fresh"):
+                    sig_type = "injury_fresh"
+                elif inj.get("boost", 0) > 0:
+                    sig_type = "injury_boosted"
+                else:
+                    sig_type = "cross_market"
+                close_time = m.get("close_time") or m.get("expected_expiration_time") or ""
+                clv_tracker.record_entry(
+                    ticker, side, entry_price, close_time,
+                    title=m.get("title", ticker),
+                    signal_type=sig_type,
+                )
+
             if self.settings.get("notify_sms") or self.settings.get("notify_email"):
                 notifier.notify_buy(ticker, side, count, entry_price, actual_cost)
             self._status_msg = f"Entered {ticker} {side.upper()} @ {entry_price}¢"
@@ -1015,6 +1039,22 @@ class TradingEngine:
         except Exception:
             pass
 
+        # CLV summary — the strategy health indicator
+        clv_summary = {}
+        if CLV_ENABLED:
+            try:
+                clv_summary = clv_tracker.get_summary()
+            except Exception:
+                pass
+
+        # Injury scanner status
+        injury_status = {}
+        if INJURY_ENABLED:
+            try:
+                injury_status = injury_scanner.status_summary()
+            except Exception:
+                pass
+
         return {
             "running":          self.running,
             "paper_trading":    PAPER_TRADING,
@@ -1033,6 +1073,8 @@ class TradingEngine:
             "last_entries":     self._last_entries_count,
             "cooldowns":        cooldowns,
             "cross_market":     cm_freshness,
+            "clv":              clv_summary,
+            "injury":           injury_status,
         }
 
     def get_trades(self):
