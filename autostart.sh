@@ -24,7 +24,7 @@ done
 
 # ── Start KK Trader (port 5559) ───────────────────────────────────────────────
 cd /Users/miahsm1/kalshi-trader
-python3 app.py >> /tmp/kk-trader.log 2>&1 &
+./venv/bin/python app.py >> /tmp/kk-trader.log 2>&1 &
 TRADER_PID=$!
 echo "[$(date)] KK Trader started (PID $TRADER_PID)" >> /tmp/kk-autostart.log
 
