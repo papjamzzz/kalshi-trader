@@ -42,7 +42,7 @@ _odds_ts      = 0.0
 
 REFRESH_INTERVAL      = 90      # seconds between Polymarket refreshes (free — no quota)
 ODDS_REFRESH_INTERVAL = 21600   # seconds between sportsbook refreshes (6h — 500/mo budget)
-GAP_THRESHOLD    = 0.05  # minimum external-vs-kalshi prob gap to count as edge (3% had too many noise matches)
+GAP_THRESHOLD    = 0.07  # 7% minimum gap — tighter than 5%, reduces noise at cost of fewer signals
 
 STOP_WORDS = {
     "the","a","an","is","are","will","to","of","in","on","at","for","be","by",
@@ -191,8 +191,9 @@ def compute_cross_edge(kalshi_market, pm_markets, odds_events):
         external_probs.append(pm_p)
 
     # ── Sportsbooks ─────────────────────────────────────────────────────────
+    MIN_BOOKMAKERS = 3   # require consensus from at least 3 books — single book = noise
     ev, ev_sim = _best_match(title, odds_events, lambda e: e["title"])
-    if ev:
+    if ev and ev.get("bookmakers", 0) >= MIN_BOOKMAKERS:
         home_words  = _word_set(ev.get("home", ""))
         title_words = _word_set(title)
         home_match  = len(home_words & title_words)

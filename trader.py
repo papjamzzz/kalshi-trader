@@ -272,8 +272,9 @@ class TradingEngine:
 
     def _fetch_markets(self):
         """
-        Try KK first (it may score sports markets with higher signal).
-        Always supplement with a direct sports fetch so we never miss game markets.
+        KK feeds ALL market types — event markets (TV, elections, companies) are
+        profitable per historical data. Sports game markets are fine. Season futures
+        (KXNBA-26-*, etc.) are blocked in _should_enter.
         """
         kk_markets = []
         try:
@@ -281,16 +282,14 @@ class TradingEngine:
             if r.status_code == 200:
                 data = r.json()
                 raw = data if isinstance(data, list) else data.get("markets", [])
-                # Only keep sports from KK
-                kk_markets = [m for m in raw if any(
-                    m.get("ticker", "").startswith(p) for p in self.SPORTS_PREFIXES
-                )]
+                # Use ALL KK markets — season futures blocked in _should_enter
+                kk_markets = list(raw)
                 if kk_markets:
-                    print(f"  📡 {len(kk_markets)} sports markets from KK")
+                    print(f"  📡 {len(kk_markets)} markets from KK")
         except Exception:
             pass
 
-        # Always do a direct sports fetch — merges with KK, deduplicates by ticker
+        # Always supplement with direct sports fetch (game markets, spreads, totals)
         direct = self._fetch_sports_direct()
         seen = {m["ticker"] for m in kk_markets}
         for m in direct:
@@ -299,7 +298,7 @@ class TradingEngine:
                 seen.add(m["ticker"])
 
         markets = kk_markets
-        print(f"  📊 {len(markets)} total sports markets to scan")
+        print(f"  📊 {len(markets)} total markets to scan (sports + events)")
 
         if CROSS_MARKET_ENABLED:
             try:
@@ -360,10 +359,10 @@ class TradingEngine:
             top = max(skip_reasons, key=skip_reasons.get)
             self._status_msg = f"Scanning — top skip: {top} ({skip_reasons[top]})"
 
-    # Game-level markets only — NOT season-long futures (KXNBA-26-PHI etc.)
-    # KXNBAGAME, KXMLBGAME, KXNHLGAME = individual game markets
-    # KXNBASPREAD, KXMLBSPREAD, KXNHLSPREAD = spreads
-    # KXNBATOTAL, KXMLBTOTAL, KXNHLTOTAL = over/unders
+    # Season-long futures — block entirely (0% win rate historically)
+    SEASON_PREFIXES = ("KXNBA-", "KXMLB-", "KXNHL-", "KXNFL-", "KXNASCAR-")
+
+    # Game-level sports markets — fine to trade with cross-market signal
     SPORTS_PREFIXES = (
         "KXNBAGAME", "KXMLBGAME", "KXNHLGAME",
         "KXNBASPREAD", "KXMLBSPREAD", "KXNHLSPREAD",
@@ -373,6 +372,10 @@ class TradingEngine:
 
     STOP_COOLDOWN_HOURS = 24
     _5I_MIN_AGREE      = 3     # minimum models that must say TRADE to proceed
+
+    def _is_sports_game(self, ticker):
+        """True for game-level sports markets (KXNBAGAME-*, etc.) — NOT season futures."""
+        return any(ticker.startswith(p) for p in self.SPORTS_PREFIXES)
 
     def _ask_5i(self, market, cross_signal, ext_prob, gap_pct, sources):
         """
@@ -392,14 +395,20 @@ class TradingEngine:
         buy_prob = yes_ask if cross_signal == "YES" else (100 - yes_ask)
 
         prompt = (
-            f'Kalshi prediction market: "{title}"\n'
-            f"Kalshi implied probability: {buy_prob}¢ ({buy_prob}%)\n"
-            f"External sportsbook consensus: {round(ext_prob*100)}% ({', '.join(sources)})\n"
-            f"Edge gap: {gap_pct:.1f}% — books price it higher than Kalshi\n"
-            f"Proposed trade: BUY {side}\n\n"
-            f"Is this a real edge worth trading, or likely noise?\n"
-            f"Reply with exactly one word on the first line: TRADE or SKIP. "
-            f"Then one sentence of reasoning."
+            f'Prediction market trade evaluation.\n\n'
+            f'Market: "{title}"\n'
+            f'Kalshi price: {buy_prob}¢ (implies {buy_prob}% probability of YES)\n'
+            f'External consensus: {round(ext_prob*100)}% from {", ".join(sources)}\n'
+            f'Edge gap: {gap_pct:.1f}% — external sources price it {gap_pct:.1f}% '
+            f'{"higher" if side == "YES" else "lower"} than Kalshi\n'
+            f'Proposed trade: BUY {side} at {buy_prob}¢\n\n'
+            f'This edge passed volume, spread, cooldown, and direction filters. '
+            f'Your job: catch anything those filters miss.\n'
+            f'Red flags to check: stale data mismatch, scope difference (e.g. Polymarket '
+            f'market covers a different outcome), this market resolving very soon, '
+            f'or gap that reflects a known event already priced in.\n\n'
+            f'First line only: TRADE or SKIP\n'
+            f'Second line: one sentence reason.'
         )
 
         body = {"prompt": prompt, "verdict": True, "models": ["claude", "gpt", "gemini", "grok", "mistral"]}
@@ -457,9 +466,11 @@ class TradingEngine:
         if not ticker:
             return reject("no_ticker")
 
-        # Game-level only — block season-long futures like KXNBA-26-PHI
-        if not any(ticker.startswith(p) for p in self.SPORTS_PREFIXES):
-            return reject("not_game_market")
+        # Block season-long futures (0/30 win rate, -$45 historically)
+        # KXNBA-26-PHI / KXMLB-26-TEX / KXNHL-26-UTA are season outcomes — never trade these.
+        # Event markets (TV, elections, companies) and game markets are both allowed.
+        if any(ticker.startswith(p) for p in self.SEASON_PREFIXES):
+            return reject("season_future_blocked")
 
         # Already in this market
         if ticker in self.positions:
@@ -560,11 +571,13 @@ class TradingEngine:
         return None
 
     def _enter_position(self, m, s):
-        ticker  = m.get("ticker", "")
-        yes_bid = m.get("yes_bid", 0)
-        yes_ask = m.get("yes_ask", 0)
-        side    = self._determine_side(yes_bid, yes_ask)
-        score   = float(m.get("score", 0))
+        ticker       = m.get("ticker", "")
+        yes_bid      = m.get("yes_bid", 0)
+        yes_ask      = m.get("yes_ask", 0)
+        cross_signal = (m.get("cross_edge") or {}).get("signal")
+        # Pass cross_signal so direction uses the expanded 48/52¢ zone
+        side  = self._determine_side(yes_bid, yes_ask, cross_signal)
+        score = float(m.get("score", 0))
 
         if side == "yes":
             entry_price = int(round(yes_ask))   # must be whole cents for Kalshi API
@@ -601,6 +614,7 @@ class TradingEngine:
                 "order_id":      order_id,
                 "edge_score":    score,
                 "title":         m.get("title", ticker),
+                "peak_pnl_pct":  0.0,   # trailing stop tracker
             }
             with self._lock:
                 self.positions[ticker] = position
@@ -629,8 +643,10 @@ class TradingEngine:
             return
 
         s = self.settings
-        take_profit = s.get("take_profit_pct", 25.0)
-        stop_loss   = s.get("stop_loss_pct", 20.0)
+        take_profit = s.get("take_profit_pct", 18.0)
+        # SL is type-aware: sports game markets need 22% breathing room (noisy);
+        # event markets (TV, elections, corporate) use tighter 12% — wrong = wrong, exit fast
+        _base_sl    = s.get("stop_loss_pct", 20.0)
 
         # Build market price lookup from current scan
         price_map = {m.get("ticker"): m for m in markets if m.get("ticker")}
@@ -677,9 +693,24 @@ class TradingEngine:
 
             pnl_pct = kapi.pnl_pct(pos["entry_price"], current_price)
 
+            # Type-aware stop loss: sports games get wider room (noisy markets),
+            # event markets (TV/elections/corporate) get tighter cutoff
+            is_sports = self._is_sports_game(ticker)
+            stop_loss = _base_sl * 1.4 if is_sports else _base_sl * 0.7
+
             # Take profit
             if pnl_pct >= take_profit:
                 self._exit_position(ticker, pos, current_price, "take_profit")
+                continue
+
+            # Trailing stop: if we've ever been up 12%+, don't give back more than half
+            peak = pos.get("peak_pnl_pct", 0.0)
+            if pnl_pct > peak:
+                with self._lock:
+                    self.positions[ticker]["peak_pnl_pct"] = pnl_pct
+                peak = pnl_pct
+            if peak >= 12.0 and pnl_pct < (peak * 0.45):
+                self._exit_position(ticker, pos, current_price, "trailing_stop")
                 continue
 
             # Stop loss
@@ -687,14 +718,17 @@ class TradingEngine:
                 self._exit_position(ticker, pos, current_price, "stop_loss")
                 continue
 
-            # Expiry check — close anything expiring in < 2h
+            # Pre-game exit for sports: close 1h before game start (market close)
+            # This locks in any pre-game drift and avoids in-game volatility.
+            # Event markets (TV releases, elections) get standard 2h window.
             close_time = current_market.get("close_time") or current_market.get("expected_expiration_time")
             if close_time:
                 try:
                     exp = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
                     from datetime import timezone
                     hours_left = (exp - datetime.now(timezone.utc)).total_seconds() / 3600
-                    if hours_left < 2:
+                    exit_window = 1.0 if is_sports else 2.0
+                    if hours_left < exit_window:
                         reason = "take_profit" if pnl_pct > 0 else "expiry_exit"
                         self._exit_position(ticker, pos, current_price, reason)
                 except Exception:
