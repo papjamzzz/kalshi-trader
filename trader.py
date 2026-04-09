@@ -30,6 +30,14 @@ except Exception as e:
     print(f"  ⚠ Cross-market disabled: {e}")
     CROSS_MARKET_ENABLED = False
 
+try:
+    import injury as injury_scanner
+    injury_scanner.start()
+    INJURY_ENABLED = True
+except Exception as e:
+    print(f"  ⚠ Injury scanner disabled: {e}")
+    INJURY_ENABLED = False
+
 # ── 5i Synthesis Engine — final decision gate ─────────────────────────────────
 # Tries localhost first (if 5i is running locally), falls back to Railway.
 # Only called after all other filters pass — rare, cheap (~$0.017/call).
@@ -198,7 +206,7 @@ class TradingEngine:
                 print(f"  ⚠ Engine loop error: {e}")
                 self._status_msg = f"Error: {str(e)[:60]}"
 
-            interval = self.settings.get("scan_interval", 90)
+            interval = self._get_scan_interval()
             time.sleep(interval)
 
     def _daily_check(self):
@@ -213,6 +221,23 @@ class TradingEngine:
     def _daily_limit_hit(self):
         cap = self.settings.get("daily_loss_cap", 50.0)
         return self._daily_pnl <= -cap
+
+    def _get_scan_interval(self):
+        """
+        Dynamic scan interval based on injury windows and fresh signals.
+        Normal: 120s. Injury window: 15s. Fresh OUT/Doubtful: 8s.
+        This clusters contract entries around the windows that matter.
+        """
+        base = self.settings.get("scan_interval", 120)
+        if not INJURY_ENABLED:
+            return base
+        interval = injury_scanner.recommended_scan_interval(base)
+        if interval < base:
+            window = injury_scanner.active_window_name()
+            fresh  = injury_scanner.has_fresh_signal(20)
+            tag = "fresh injury" if fresh else f"window:{window}"
+            print(f"  ⚡ Fast scan ({interval}s) — {tag}")
+        return interval
 
     # ── Market Fetching ───────────────────────────────────────────────────────
 
@@ -377,7 +402,7 @@ class TradingEngine:
         """True for game-level sports markets (KXNBAGAME-*, etc.) — NOT season futures."""
         return any(ticker.startswith(p) for p in self.SPORTS_PREFIXES)
 
-    def _ask_5i(self, market, cross_signal, ext_prob, gap_pct, sources):
+    def _ask_5i(self, market, cross_signal, ext_prob, gap_pct, sources, inj_signal=None):
         """
         Final decision gate — asks 5i (5-model synthesis engine) whether this
         trade has real edge. Returns True if ≥ _5I_MIN_AGREE models say TRADE.
@@ -394,6 +419,15 @@ class TradingEngine:
         side     = "YES" if cross_signal == "YES" else "NO"
         buy_prob = yes_ask if cross_signal == "YES" else (100 - yes_ask)
 
+        # Build injury context line if available
+        inj_context = ""
+        if inj_signal and inj_signal.get("affected"):
+            players = ", ".join(
+                f"{a['player']} ({a['status']})"
+                for a in inj_signal["affected"][:3]
+            )
+            inj_context = f"Injury context: {players}\n"
+
         prompt = (
             f'Prediction market trade evaluation.\n\n'
             f'Market: "{title}"\n'
@@ -401,12 +435,12 @@ class TradingEngine:
             f'External consensus: {round(ext_prob*100)}% from {", ".join(sources)}\n'
             f'Edge gap: {gap_pct:.1f}% — external sources price it {gap_pct:.1f}% '
             f'{"higher" if side == "YES" else "lower"} than Kalshi\n'
+            f'{inj_context}'
             f'Proposed trade: BUY {side} at {buy_prob}¢\n\n'
             f'This edge passed volume, spread, cooldown, and direction filters. '
             f'Your job: catch anything those filters miss.\n'
-            f'Red flags to check: stale data mismatch, scope difference (e.g. Polymarket '
-            f'market covers a different outcome), this market resolving very soon, '
-            f'or gap that reflects a known event already priced in.\n\n'
+            f'Red flags: stale data mismatch, scope difference (Polymarket covers '
+            f'different outcome), market resolving very soon, gap already priced in.\n\n'
             f'First line only: TRADE or SKIP\n'
             f'Second line: one sentence reason.'
         )
@@ -541,15 +575,42 @@ class TradingEngine:
         if cross_signal == "NO" and side != "no":
             return reject("direction_mismatch")
 
+        # ── Injury Signal ─────────────────────────────────────────────────────
+        # Check if a key player is OUT/Doubtful for this game.
+        # Fresh injury (< 30 min) = Kalshi almost certainly hasn't repriced.
+        # Boost the score and note it for the 5i prompt.
+        inj_signal = {"impact": "none", "boost": 0, "fresh": False, "affected": []}
+        if INJURY_ENABLED:
+            inj_signal = injury_scanner.get_injury_signal(
+                m.get("title", ""), m.get("ticker", "")
+            )
+            if inj_signal["boost"] > 0:
+                old_score = float(m.get("score", 0))
+                m["score"] = old_score + inj_signal["boost"]
+                m["injury_signal"] = inj_signal
+                tag = "🚨 FRESH" if inj_signal["fresh"] else "🏥"
+                print(f"  {tag} Injury boost +{inj_signal['boost']}pts → score={m['score']:.0f} | "
+                      f"{ticker} | "
+                      f"{', '.join(a['player'] + ' ' + a['status'] for a in inj_signal['affected'][:2])}")
+
+        # Re-check edge score after injury boost
+        score = float(m.get("score", 0))
+        if score < s.get("min_edge_score", 65):
+            return reject("edge_score_low_post_injury")
+
         # ── 5i Final Gate ─────────────────────────────────────────────────────
         # Only reached if ALL other filters passed. Asks 5 AI models whether
         # the edge is real. Requires ≥ 3/5 to say TRADE. ~$0.017/call.
+        # Fresh injury bypasses 5i — speed matters more than AI approval when
+        # the window is 5–15 minutes.
         gaps    = [g for _, g in ce.get("gaps", [])]
         sources = ce.get("sources", [])
         ext_prob = (sum(abs(g) for g in gaps) / len(gaps) + yes_ask / 100) if gaps else yes_ask / 100
         gap_pct  = abs(sum(gaps) / len(gaps)) * 100 if gaps else 0
 
-        if not self._ask_5i(m, cross_signal, ext_prob, gap_pct, sources):
+        if inj_signal.get("fresh"):
+            print(f"  ⚡ 5i bypassed — fresh injury signal, speed is the edge")
+        elif not self._ask_5i(m, cross_signal, ext_prob, gap_pct, sources, inj_signal):
             return reject("5i_rejected")
 
         return True
