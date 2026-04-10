@@ -16,15 +16,15 @@ KK Trader removes the human from the loop entirely. You set the parameters. The 
 
 ## Features
 
-- 🤖 **Fully autonomous** — scans, enters, monitors, and exits positions on a configurable interval
-- 📡 **Edge-fed entries** — reads scored markets from Kalshi Konnektor, falls back to direct API
-- 🎛 **KT-1 Signal Processor** — Ableton-style fader board to tune all risk parameters live, no restart
-- 📊 **Session view trade log** — Ableton clip-row style log, blue/green/red by trade outcome
-- 💬 **KK chat panel** — ask your bot what it's doing, why, and what it thinks of your session
-- 📱 **SMS + email alerts** — Twilio + Gmail, fires on every buy, exit, stop, and daily limit hit
-- 🛑 **Daily loss cap** — hard stop when drawdown limit is hit, bot parks itself
-- ⚖️ **Multi-signal entry filter** — volume gate, edge score, spread check, expiry guard, direction filter — ALL must pass
-- 🌑 **Dark theme** — Ableton aesthetic, built for long sessions
+- **Fully autonomous** — scans, enters, monitors, and exits positions on a configurable interval
+- **Edge-fed entries** — reads scored markets from Kalshi Konnektor, falls back to direct API
+- **KT-1 Signal Processor** — Ableton-style fader board to tune all risk parameters live, no restart
+- **Session view trade log** — Ableton clip-row style log, blue/green/red by trade outcome
+- **KK chat panel** — ask your bot what it's doing, why, and what it thinks of your session
+- **SMS + email alerts** — Twilio + Gmail, fires on every buy, exit, stop, and daily limit hit
+- **Daily loss cap** — hard stop when drawdown limit is hit, bot parks itself
+- **Multi-signal entry filter** — volume gate, edge score, spread check, expiry guard, direction filter — ALL must pass
+- **Dark theme** — Ableton aesthetic, built for long sessions
 
 ---
 
@@ -159,4 +159,4 @@ Built by [Creative Konsoles](https://creativekonsoles.com) — tools built using
 
 **[creativekonsoles.com](https://creativekonsoles.com)** &nbsp;·&nbsp; support@creativekonsoles.com
 
-<!-- repo maintenance: 2026-04-04 -->
+<!-- repo maintenance: 2026-04-10 -->
