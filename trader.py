@@ -322,16 +322,10 @@ class TradingEngine:
         except Exception:
             pass
 
-        # Always supplement with direct sports fetch (game markets, spreads, totals)
-        direct = self._fetch_sports_direct()
-        seen = {m["ticker"] for m in kk_markets}
-        for m in direct:
-            if m["ticker"] not in seen:
-                kk_markets.append(m)
-                seen.add(m["ticker"])
-
+        # Sports direct fetch disabled — all sports blocked in _should_enter.
+        # Scanning KK markets only: weather, fed/econ, crypto, politics, pop culture.
         markets = kk_markets
-        print(f"  📊 {len(markets)} total markets to scan (sports + events)")
+        print(f"  📊 {len(markets)} markets to scan (non-sports only)")
 
         if CROSS_MARKET_ENABLED:
             try:
@@ -404,7 +398,7 @@ class TradingEngine:
     )
 
     STOP_COOLDOWN_HOURS = 24
-    _5I_MIN_AGREE      = 3     # minimum models that must say TRADE to proceed
+    _5I_MIN_AGREE      = 5     # require ALL 5 models — maximum conviction only
 
     def _is_sports_game(self, ticker):
         """True for game-level sports markets (KXNBAGAME-*, etc.) — NOT season futures."""
@@ -508,11 +502,12 @@ class TradingEngine:
         if not ticker:
             return reject("no_ticker")
 
-        # Block season-long futures (0/30 win rate, -$45 historically)
-        # KXNBA-26-PHI / KXMLB-26-TEX / KXNHL-26-UTA are season outcomes — never trade these.
-        # Event markets (TV, elections, companies) and game markets are both allowed.
-        if any(ticker.startswith(p) for p in self.SEASON_PREFIXES):
-            return reject("season_future_blocked")
+        # Block ALL sports — season futures AND game markets.
+        # Sportsbooks + arb bots price these to near-zero edge. Bot loses here.
+        # Real edge lives in: weather, fed/econ, crypto, politics, pop culture.
+        ALL_SPORTS = self.SEASON_PREFIXES + self.SPORTS_PREFIXES
+        if any(ticker.startswith(p) for p in ALL_SPORTS):
+            return reject("sports_blocked")
 
         # Already in this market
         if ticker in self.positions:
