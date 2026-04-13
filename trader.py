@@ -563,19 +563,35 @@ class TradingEngine:
         if likely_entry < 15:
             return reject("price_below_floor")
 
-        # Spread check — absolute AND profitability check
+        # Spread quality score — gates hard rejects AND penalizes borderline markets
+        # spread_ratio = spread / entry as a % of stop_loss → how much of the buffer is eaten on entry
         spread = yes_ask - yes_bid
         max_spread = 18 if cross_signal else 25
         if spread > max_spread:
             return reject("spread_too_wide")
-        # Immediate-loss guard: entering at ask/bid means instant P&L = spread/entry.
-        # If that loss already exceeds stop_loss, we'd stop out the moment the grace period ends.
-        base_sl = s.get("stop_loss_pct", 20.0)
-        entry_p = likely_entry
-        if entry_p > 0:
-            immediate_loss_pct = (spread / entry_p) * 100
-            if immediate_loss_pct >= base_sl:
-                return reject("spread_exceeds_stop_loss")
+
+        base_sl   = s.get("stop_loss_pct", 20.0)
+        entry_p   = likely_entry
+        spread_sl_ratio = (spread / entry_p / base_sl * 100) if entry_p > 0 else 100  # % of stop loss consumed
+
+        # Hard reject: spread alone would trigger stop loss on entry
+        if spread_sl_ratio >= 100:
+            return reject("spread_exceeds_stop_loss")
+
+        # Score penalty: bad spreads eat into signal quality
+        # 60–100% of SL → -15 pts (strong: margin is too thin, need a big move just to break even)
+        # 30–60%  of SL → -7  pts (mild: manageable but worth discounting)
+        # <30%    of SL → no penalty (tight spread, full edge retained)
+        if spread_sl_ratio >= 60:
+            spread_penalty = -15
+        elif spread_sl_ratio >= 30:
+            spread_penalty = -7
+        else:
+            spread_penalty = 0
+
+        if spread_penalty:
+            m["score"] = float(m.get("score", 0)) + spread_penalty
+            m["spread_penalty"] = spread_penalty
 
         # Time to expiry
         close_time = m.get("close_time") or m.get("expected_expiration_time")
