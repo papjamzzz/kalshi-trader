@@ -1023,13 +1023,16 @@ class TradingEngine:
         cm_freshness = {}
         try:
             import cross_market
-            age_pm   = round((now - cross_market._pm_ts)   / 60, 1) if cross_market._pm_ts   else None
-            age_odds = round((now - cross_market._odds_ts) / 60, 1) if cross_market._odds_ts else None
+            import fedwatch
+            import noaa
+            age_pm  = round((now - cross_market._pm_ts) / 60, 1) if cross_market._pm_ts else None
+            fed_meetings = len(fedwatch._cache)
+            noaa_cities  = len(noaa._forecasts)
             cm_freshness = {
-                "polymarket_age_min":  age_pm,
-                "sportsbook_age_min":  age_odds,
-                "polymarket_count":    len(cross_market._pm_markets),
-                "sportsbook_count":    len(cross_market._odds_events),
+                "polymarket_age_min": age_pm,
+                "polymarket_count":   len(cross_market._pm_markets),
+                "fedwatch_meetings":  fed_meetings,
+                "noaa_cities":        noaa_cities,
             }
         except Exception:
             pass

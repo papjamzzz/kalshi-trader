@@ -1,48 +1,51 @@
 """
-Cross-Market Edge Engine — v2
+Cross-Market Edge Engine — v3
 
 Strategy: buy Kalshi markets that external consensus prices higher.
-Every penny of gap is real edge. We don't need a huge gap — we need
-consistent, confirmed gaps across 1+ sources. Even a 3% discrepancy
-is exploitable if Kalshi is slow to reprice and we hold through correction.
+Every gap is real edge — Kalshi reprices slower than the sources below.
+
+Sources (in priority order):
+  1. Polymarket     — prediction market consensus (free, 1000 markets/cycle)
+  2. CME FedWatch   — FOMC meeting probabilities from futures pricing (free)
+  3. NOAA/NWS       — official weather forecasts for 15 major US cities (free)
+
+Sports/sportsbooks removed — those markets are already efficiently priced.
+Real edge lives in weather, Fed/econ, crypto, politics, pop culture.
 
 Architecture:
-  - Background prefetch thread updates data every 90s independently.
-    When the scan cycle hits, data is already warm — zero blocking latency.
-  - Polymarket + OddsAPI fetched in parallel via ThreadPoolExecutor.
-  - 1000 Polymarket markets loaded per cycle for maximum coverage.
-  - Gap threshold: 3% (was 5%). Small edges replicate. We want volume.
+  - Background threads update each source independently.
+  - Polymarket: every 90s. FedWatch: every 1h. NOAA: every 1h.
+  - enrich_markets() reads from in-memory cache — zero blocking latency.
   - Multi-source confidence:
-      2+ sources agree on direction → full bonus
-      1 source only              → 65% bonus
-      Sources disagree           → 0 bonus (skip — conflicted)
+      2+ sources agree → full bonus
+      1 source only    → 65% bonus
+      Sources disagree → 0 bonus (skip — conflicted signal)
 
-Bonus scale (per source gap):
-  3–5%  → +8  pts
-  5–8%  → +14 pts
-  8–12% → +20 pts
-  12%+  → +28 pts
+Bonus scale (per gap magnitude):
+  7–10%  → +8  pts
+  10–15% → +14 pts
+  15–20% → +20 pts
+  20%+   → +28 pts
   Max total bonus: 30 pts
-
-Score of 50 base + 12 cross bonus = 62 → above threshold → buy.
 """
 
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import polymarket
-import odds_api
+import fedwatch
+import noaa
 
 # ── Shared state — written by bg thread, read by scan ────────────────────────
-_lock = threading.Lock()
-_pm_markets   = []   # list of parsed polymarket dicts
-_odds_events  = []   # list of parsed sportsbook event dicts
-_pm_ts        = 0.0
-_odds_ts      = 0.0
+_lock       = threading.Lock()
+_pm_markets = []    # Polymarket parsed market dicts
+_pm_ts      = 0.0
 
-REFRESH_INTERVAL      = 90      # seconds between Polymarket refreshes (free — no quota)
-ODDS_REFRESH_INTERVAL = 21600   # seconds between sportsbook refreshes (6h — 500/mo budget)
-GAP_THRESHOLD    = 0.07  # 7% minimum gap — tighter than 5%, reduces noise at cost of fewer signals
+PM_REFRESH_INTERVAL  = 90      # Polymarket: 90s (free, no quota)
+FED_REFRESH_INTERVAL = 3600    # FedWatch: 1h (FOMC probs don't move fast)
+NOAA_REFRESH_INTERVAL = 3600   # NOAA: 1h (NWS updates hourly)
+
+GAP_THRESHOLD = 0.07   # 7% minimum gap to count as edge signal
 
 STOP_WORDS = {
     "the","a","an","is","are","will","to","of","in","on","at","for","be","by",
@@ -86,14 +89,14 @@ def _best_match(kalshi_title, candidates, key_fn, threshold=0.35):
 # ── Bonus calculation ─────────────────────────────────────────────────────────
 
 def _gap_bonus(gap_abs):
-    """Convert a probability gap (0–1) into a score bonus (0–28)."""
+    """Convert a probability gap (0–1) into a score bonus."""
     if gap_abs < GAP_THRESHOLD:
         return 0
-    if gap_abs < 0.05:
+    if gap_abs < 0.10:
         return 8
-    if gap_abs < 0.08:
+    if gap_abs < 0.15:
         return 14
-    if gap_abs < 0.12:
+    if gap_abs < 0.20:
         return 20
     return 28
 
@@ -102,120 +105,111 @@ def _gap_bonus(gap_abs):
 
 def _fetch_polymarket():
     global _pm_markets, _pm_ts
-    raw = polymarket.get_active_markets(limit=1000)
+    raw    = polymarket.get_active_markets(limit=1000)
     parsed = [m for m in (polymarket.parse_market(r) for r in raw) if m]
     with _lock:
         _pm_markets = parsed
-        _pm_ts = time.time()
+        _pm_ts      = time.time()
     print(f"  [Cross/bg] Polymarket: {len(parsed)} markets")
 
 
-def _fetch_odds():
-    global _odds_events, _odds_ts
-    events = odds_api.get_all_odds()
-    with _lock:
-        _odds_events = events
-        _odds_ts = time.time()
-
-
 def _pm_loop():
-    """Polymarket loop — free API, refresh every 90s."""
     while True:
         try:
             _fetch_polymarket()
         except Exception as e:
             print(f"  [Cross/pm] error: {e}")
-        time.sleep(REFRESH_INTERVAL)
-
-
-def _odds_loop():
-    """
-    Sportsbook odds loop — APILayer free tier: 500 req/month.
-    3 sports × fetch every 6h = ~360 calls/month. Stays under quota.
-    """
-    while True:
-        try:
-            _fetch_odds()
-        except Exception as e:
-            print(f"  [Cross/odds] error: {e}")
-        time.sleep(ODDS_REFRESH_INTERVAL)
+        time.sleep(PM_REFRESH_INTERVAL)
 
 
 def start_background_fetcher():
-    """Call once at startup. Two independent loops — different refresh rates."""
-    threading.Thread(target=_pm_loop,   daemon=True, name="cross-pm-bg").start()
-    threading.Thread(target=_odds_loop, daemon=True, name="cross-odds-bg").start()
-    # Warm both caches immediately on startup
+    """Start all background data threads. Call once at startup."""
+    # Polymarket loop
+    threading.Thread(target=_pm_loop, daemon=True, name="cross-pm-bg").start()
+    # FedWatch + NOAA have their own internal refresh loops
+    fedwatch.get_meetings()    # warm FedWatch cache immediately
+    noaa.start()               # starts NOAA background thread
+    # Warm Polymarket immediately
     threading.Thread(target=_fetch_polymarket, daemon=True).start()
-    threading.Thread(target=_fetch_odds,       daemon=True).start()
-    print("  [Cross] Background prefetch threads started (PM: 90s / Odds: 6h)")
+    print("  [Cross] Background prefetch started — Polymarket(90s) / FedWatch(1h) / NOAA(1h)")
 
 
 # ── Core edge computation ─────────────────────────────────────────────────────
 
-def compute_cross_edge(kalshi_market, pm_markets, odds_events):
+def compute_cross_edge(kalshi_market, pm_markets):
     """
+    Compare Kalshi price against all external sources.
     Returns edge dict with bonus score and directional signal.
-
-    kalshi_prob = yes_ask / 100
-    external sources price the same event differently → gap = edge
     """
     title    = kalshi_market.get("title") or kalshi_market.get("ticker", "")
     yes_ask  = float(kalshi_market.get("yes_ask", 50))
     kalshi_p = yes_ask / 100.0
 
     result = {
-        "bonus":    0,
-        "signal":   None,    # "YES" | "NO" | None
-        "sources":  [],
-        "gaps":     [],      # [(source_name, gap_float)]
+        "bonus":   0,
+        "signal":  None,
+        "sources": [],
+        "gaps":    [],
+        # Polymarket
         "pm_match": None,
         "pm_prob":  None,
         "pm_sim":   0.0,
-        "bk_match": None,
-        "bk_prob":  None,
-        "bk_books": 0,
-        "bk_sim":   0.0,
+        # FedWatch
+        "fed_prob":    None,
+        "fed_meeting": None,
+        # NOAA
+        "noaa_prob":   None,
+        "noaa_city":   None,
+        "noaa_detail": None,
     }
 
     external_probs = []
 
-    # ── Polymarket ──────────────────────────────────────────────────────────
+    # ── 1. Polymarket ────────────────────────────────────────────────────────
     pm, pm_sim = _best_match(title, pm_markets, lambda m: m["question"])
     if pm and pm.get("yes_prob") is not None:
         pm_p = pm["yes_prob"]
         gap  = pm_p - kalshi_p
         result.update(pm_match=pm["question"], pm_prob=round(pm_p, 4), pm_sim=round(pm_sim, 3))
-        result["sources"].append("polymarket")
-        result["gaps"].append(("polymarket", gap))
+        result["sources"].append("Polymarket")
+        result["gaps"].append(("Polymarket", gap))
         external_probs.append(pm_p)
 
-    # ── Sportsbooks ─────────────────────────────────────────────────────────
-    MIN_BOOKMAKERS = 3   # require consensus from at least 3 books — single book = noise
-    ev, ev_sim = _best_match(title, odds_events, lambda e: e["title"])
-    if ev and ev.get("bookmakers", 0) >= MIN_BOOKMAKERS:
-        home_words  = _word_set(ev.get("home", ""))
-        title_words = _word_set(title)
-        home_match  = len(home_words & title_words)
-        ext_p = ev["home_prob"] if home_match > 0 else ev["away_prob"]
-        gap   = ext_p - kalshi_p
-        result.update(bk_match=ev["title"], bk_prob=round(ext_p, 4),
-                      bk_books=ev["bookmakers"], bk_sim=round(ev_sim, 3))
-        result["sources"].append(f"books({ev['bookmakers']})")
-        result["gaps"].append(("sportsbooks", gap))
-        external_probs.append(ext_p)
+    # ── 2. CME FedWatch ──────────────────────────────────────────────────────
+    fed = fedwatch.match_market(title)
+    if fed and fed.get("prob") is not None:
+        fed_p = fed["prob"]
+        gap   = fed_p - kalshi_p
+        result.update(fed_prob=round(fed_p, 4), fed_meeting=fed.get("meeting"))
+        result["sources"].append("CME FedWatch")
+        result["gaps"].append(("CME FedWatch", gap))
+        external_probs.append(fed_p)
+
+    # ── 3. NOAA/NWS ──────────────────────────────────────────────────────────
+    wx = noaa.match_market(title)
+    if wx and wx.get("prob") is not None:
+        wx_p = wx["prob"]
+        gap  = wx_p - kalshi_p
+        result.update(
+            noaa_prob=round(wx_p, 4),
+            noaa_city=wx.get("city"),
+            noaa_detail=wx.get("detail"),
+        )
+        result["sources"].append("NOAA/NWS")
+        result["gaps"].append(("NOAA/NWS", gap))
+        external_probs.append(wx_p)
 
     if not external_probs:
         return result
 
     # ── Direction consensus ──────────────────────────────────────────────────
-    gaps = [g for _, g in result["gaps"]]
-    all_yes = all(g > 0 for g in gaps)
-    all_no  = all(g < 0 for g in gaps)
+    gaps      = [g for _, g in result["gaps"]]
+    all_yes   = all(g > 0 for g in gaps)
+    all_no    = all(g < 0 for g in gaps)
     consistent = all_yes or all_no
 
     if not consistent:
-        # Sources disagree — no trade, too risky
+        # Sources disagree — conflicted signal, skip
         return result
 
     avg_external = sum(external_probs) / len(external_probs)
@@ -227,7 +221,7 @@ def compute_cross_edge(kalshi_market, pm_markets, odds_events):
         return result
 
     # Multi-source confidence multiplier
-    confidence = 1.0 if n_sources >= 2 else 0.65
+    confidence  = 1.0 if n_sources >= 2 else 0.65
     final_bonus = min(30, int(raw_bonus * confidence))
 
     result["bonus"]  = final_bonus
@@ -240,26 +234,22 @@ def compute_cross_edge(kalshi_market, pm_markets, odds_events):
 def enrich_markets(markets):
     """
     Called by trader.py on every scan cycle.
-    Reads from in-memory cache — no blocking API calls here.
+    Reads from in-memory caches — no blocking API calls.
     Adds cross_edge dict to each market and boosts score when edge found.
     """
     with _lock:
-        pm  = list(_pm_markets)
-        odds = list(_odds_events)
-
-    if not pm and not odds:
-        return markets
+        pm = list(_pm_markets)
 
     enriched = 0
     for m in markets:
-        ce = compute_cross_edge(m, pm, odds)
+        ce = compute_cross_edge(m, pm)
         m["cross_edge"] = ce
         if ce["bonus"] > 0:
             base = float(m.get("score", 0))
-            m["score"] = base + ce["bonus"]
+            m["score"]        = base + ce["bonus"]
             m["score_boosted"] = True
             enriched += 1
 
     if enriched:
-        print(f"  [Cross] {enriched}/{len(markets)} markets boosted")
+        print(f"  [Cross] {enriched}/{len(markets)} markets edge-boosted")
     return markets
