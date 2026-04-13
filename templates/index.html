@@ -811,11 +811,89 @@
     padding: 2px 6px;
     border-radius: 3px;
   }
-  .reason-badge.take_profit  { background: var(--green-dim); color: var(--green); }
-  .reason-badge.stop_loss    { background: var(--red-dim);   color: var(--red); }
-  .reason-badge.expiry_exit  { background: var(--amber-dim); color: var(--amber); }
-  .reason-badge.manual_exit  { background: rgba(180,180,180,0.1); color: var(--text2); border: 1px solid rgba(180,180,180,0.2); }
-  .reason-badge.buy          { background: var(--blue-dim);  color: var(--blue); }
+  .reason-badge.take_profit        { background: var(--green-dim); color: var(--green); }
+  .reason-badge.stop_loss          { background: var(--red-dim);   color: var(--red); }
+  .reason-badge.expiry_exit        { background: var(--amber-dim); color: var(--amber); }
+  .reason-badge.dead_market_expire { background: rgba(160,80,200,0.1); color: #c084fc; border: 1px solid rgba(192,132,252,0.2); }
+  .reason-badge.trailing_stop      { background: rgba(245,166,35,0.1); color: var(--amber); border: 1px solid rgba(245,166,35,0.2); }
+  .reason-badge.manual_exit        { background: rgba(180,180,180,0.1); color: var(--text2); border: 1px solid rgba(180,180,180,0.2); }
+  .reason-badge.buy                { background: var(--blue-dim);  color: var(--blue); }
+
+  /* Score flow: raw → final */
+  .score-flow {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text2);
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-top: 2px;
+  }
+  .score-raw  { color: var(--muted); }
+  .score-arrow{ color: var(--dim); }
+  .score-final{ color: var(--amber); font-weight: 700; }
+  .score-final.good { color: var(--green); }
+  .score-final.clean{ color: var(--text2); }
+
+  /* Spread ratio badge */
+  .spr-badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 8px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-top: 2px;
+  }
+  .spr-clean  { background: rgba(0,213,149,0.1);   color: var(--green);  border: 1px solid rgba(0,213,149,0.2); }
+  .spr-mild   { background: rgba(245,166,35,0.1);  color: var(--amber);  border: 1px solid rgba(245,166,35,0.2); }
+  .spr-strong { background: rgba(246,110,50,0.12); color: #f97316;       border: 1px solid rgba(249,115,22,0.25); }
+  .spr-danger { background: rgba(246,70,93,0.1);   color: var(--red);    border: 1px solid rgba(246,70,93,0.2); }
+
+  /* Side bias chips */
+  .bias-row { display: flex; align-items: center; gap: 10px; }
+  .bias-blk {
+    display: flex; flex-direction: column; gap: 2px;
+    background: var(--card); border: 1px solid var(--border2);
+    border-radius: 5px; padding: 5px 10px; min-width: 140px;
+  }
+  .bias-head {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 2px;
+  }
+  .bias-line {
+    font-family: var(--mono); font-size: 10px; color: var(--text2);
+    display: flex; justify-content: space-between; gap: 12px;
+  }
+  .bias-line .lbl { color: var(--muted); }
+  .bias-line .val { font-weight: 700; }
+  .bias-line .val.yes { color: var(--green); }
+  .bias-line .val.no  { color: var(--red); }
+
+  /* Exit attribution */
+  .exit-attr-rows { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+  .exit-attr-row  { display: flex; justify-content: space-between; }
+  .exit-attr-key  { font-family: var(--mono); font-size: 9px; color: var(--text2); }
+  .exit-attr-val  { font-family: var(--mono); font-size: 9px; font-weight: 700; color: var(--amber); }
+  .exit-attr-val.tp { color: var(--green); }
+  .exit-attr-val.sl { color: var(--red); }
+
+  /* Live rules snapshot */
+  .rules-block {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .rules-label {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 6px;
+  }
+  .rules-rows { display: flex; flex-direction: column; gap: 3px; }
+  .rules-row  { display: flex; justify-content: space-between; align-items: center; }
+  .rules-key  { font-family: var(--mono); font-size: 9px; color: var(--text2); }
+  .rules-val  { font-family: var(--mono); font-size: 9px; font-weight: 700; color: var(--green); }
+  .rules-val.amber { color: var(--amber); }
+  .rules-val.red   { color: var(--red); }
+  .rules-val.dim   { color: var(--muted); }
 
   /* Empty state */
   .empty-state {
@@ -1154,6 +1232,22 @@
 
     <div class="pipe-divider"></div>
 
+    <!-- Side Bias -->
+    <div class="bias-row">
+      <div class="bias-blk">
+        <div class="bias-head">Side Bias</div>
+        <div class="bias-line"><span class="lbl">YES</span><span class="val yes" id="bias-yes-stat">—</span></div>
+        <div class="bias-line"><span class="lbl">NO&nbsp;</span><span class="val no"  id="bias-no-stat">—</span></div>
+      </div>
+      <div class="bias-blk">
+        <div class="bias-head">Spread Impact</div>
+        <div class="bias-line"><span class="lbl">Blocked</span><span class="val" id="spr-blocked" style="color:var(--red)">—</span></div>
+        <div class="bias-line"><span class="lbl">Entered w/ penalty</span><span class="val" id="spr-downgraded" style="color:var(--amber)">—</span></div>
+      </div>
+    </div>
+
+    <div class="pipe-divider"></div>
+
     <!-- Category P&L -->
     <span class="src-label">CAT P&amp;L</span>
     <span class="src-chip" id="cat-crypto"><span class="src-name">crypto</span><span class="src-val" id="cat-crypto-val">—</span></span>
@@ -1312,6 +1406,21 @@
         <div class="fader-desc" style="margin-top:6px">Requires Twilio / Gmail creds in .env</div>
       </div>
 
+      <!-- Live Rules Snapshot -->
+      <div class="rules-block">
+        <div class="rules-label">Live Rules</div>
+        <div class="rules-rows" id="rules-rows">
+          <div class="rules-row"><span class="rules-key">Min edge score</span><span class="rules-val amber" id="rule-edge">—</span></div>
+          <div class="rules-row"><span class="rules-key">Stop loss</span><span class="rules-val red" id="rule-sl">—</span></div>
+          <div class="rules-row"><span class="rules-key">Spread hard reject</span><span class="rules-val dim">≥100% of SL</span></div>
+          <div class="rules-row"><span class="rules-key">Spread penalty tiers</span><span class="rules-val dim">30/60/75/90%</span></div>
+          <div class="rules-row"><span class="rules-key">5i threshold</span><span class="rules-val amber">3/4 models</span></div>
+          <div class="rules-row"><span class="rules-key">Sports markets</span><span class="rules-val red">blocked</span></div>
+          <div class="rules-row"><span class="rules-key">Max spend/trade</span><span class="rules-val" id="rule-spend">—</span></div>
+          <div class="rules-row"><span class="rules-key">Daily cap</span><span class="rules-val red" id="rule-cap">—</span></div>
+        </div>
+      </div>
+
       <button class="apply-btn" onclick="saveSettings()">↑ Apply Settings</button>
       <div class="apply-feedback" id="save-feedback"></div>
 
@@ -1335,6 +1444,12 @@
         <div class="diag-row"><span class="diag-key">Waiting for first scan…</span></div>
       </div>
       <div class="cm-fresh-row" id="cm-fresh-row"></div>
+
+      <!-- Exit attribution -->
+      <div class="diag-label" style="margin-top:8px">Exit Breakdown</div>
+      <div class="exit-attr-rows" id="exit-attr-rows">
+        <div class="exit-attr-row"><span class="exit-attr-key">No closed trades yet</span></div>
+      </div>
     </div>
 
   </div><!-- /left-panel -->
@@ -1523,8 +1638,14 @@ function updateUI(d) {
   // Diagnostics panel — skip reasons, cross-market freshness, cooldowns
   updateDiagnostics(d);
 
-  // Signal pipeline + sources
+  // Signal pipeline + sources + side bias + spread impact
   updatePipeline(d);
+
+  // Side bias, exit attribution, spread stats
+  updateInsights(d);
+
+  // Live rules snapshot
+  updateRulesSnapshot(d);
 
   // Positions
   renderPositions(d.open_positions || []);
@@ -1785,6 +1906,30 @@ function renderTrades() {
       timeStr = `${buyT} → ${sellT}${held}`;
     }
 
+    // Score flow: show raw→final if penalized, otherwise just final
+    const rawScore   = t.edge_score != null ? Math.round(t.edge_score) : null;
+    const sprPenalty = t.spread_penalty || 0;
+    const rawPre     = sprPenalty ? Math.round(rawScore - sprPenalty) : rawScore;
+    let scoreHtml = '';
+    if (rawScore != null) {
+      if (sprPenalty) {
+        const finalCls = rawScore >= 80 ? 'good' : rawScore >= 65 ? '' : 'dim';
+        scoreHtml = `<div class="score-flow"><span class="score-raw">${rawPre}</span><span class="score-arrow">→</span><span class="score-final ${finalCls}">${rawScore}</span></div>`;
+      } else {
+        const cls = rawScore >= 80 ? 'clean good' : 'clean';
+        scoreHtml = `<div class="score-flow"><span class="score-final ${cls}">${rawScore}</span></div>`;
+      }
+    }
+
+    // Spread ratio badge
+    const ratio = t.spread_sl_ratio;
+    let sprHtml = '';
+    if (ratio != null && ratio > 0) {
+      const sprCls = ratio < 30 ? 'spr-clean' : ratio < 60 ? 'spr-mild' : ratio < 90 ? 'spr-strong' : 'spr-danger';
+      const pen    = sprPenalty ? ` −${Math.abs(sprPenalty)}` : '';
+      sprHtml = `<span class="spr-badge ${sprCls}">SPR ${ratio.toFixed(0)}%${pen}</span>`;
+    }
+
     const row = document.createElement('div');
     row.className = `clip-row ${rowCls}`;
     row.innerHTML = `
@@ -1799,8 +1944,9 @@ function renderTrades() {
       <div class="clip-cell">${pnlHtml}</div>
       <div class="clip-cell">${pctHtml}</div>
       <div class="clip-cell" style="display:flex;flex-direction:column;gap:2px;overflow:visible;white-space:normal">
-        <span class="reason-badge ${reason}">${reason.replace('_',' ').toUpperCase()}</span>
+        <span class="reason-badge ${reason}">${reason.replace(/_/g,' ').toUpperCase()}</span>
         <span style="font-family:var(--mono);font-size:9px;color:#8899aa;line-height:1.3">${timeStr}</span>
+        ${scoreHtml}${sprHtml}
       </div>
     `;
     wrap.appendChild(row);
@@ -1875,6 +2021,91 @@ function attachFaderEditors() {
     const el = document.getElementById(id);
     if (el) el.onclick = () => makeFaderEditable(id);
   });
+}
+
+// ─── Insights: side bias + exit attribution + spread impact ──────────────────
+function updateInsights(d) {
+  const sa = d.spread_attribution || {};
+
+  // Spread impact
+  const sprBlocked = document.getElementById('spr-blocked');
+  const sprDown    = document.getElementById('spr-downgraded');
+  if (sprBlocked) sprBlocked.textContent = sa.blocked_today    != null ? sa.blocked_today    : '—';
+  if (sprDown)    sprDown.textContent    = sa.downgraded_entered != null ? sa.downgraded_entered : '—';
+
+  // Side bias — computed from trade history
+  const yesBuys = allTrades.filter(t => t.event === 'buy'  && t.side === 'yes').length;
+  const noBuys  = allTrades.filter(t => t.event === 'buy'  && t.side === 'no').length;
+  const yesSells= allTrades.filter(t => t.event === 'sell' && t.side === 'yes');
+  const noSells = allTrades.filter(t => t.event === 'sell' && t.side === 'no');
+  const yesWins = yesSells.filter(t => t.pnl > 0).length;
+  const noWins  = noSells.filter(t => t.pnl > 0).length;
+  const yesPnl  = yesSells.reduce((s,t) => s + (t.pnl||0), 0);
+  const noPnl   = noSells.reduce((s,t)  => s + (t.pnl||0), 0);
+
+  function biasStr(entries, wins, total, pnl) {
+    if (!entries) return '—';
+    const wr  = total > 0 ? Math.round(wins/total*100)+'%' : '—';
+    const pnlStr = pnl >= 0 ? '+$'+pnl.toFixed(2) : '−$'+Math.abs(pnl).toFixed(2);
+    return `${entries} entries · ${wr} wr · ${pnlStr}`;
+  }
+
+  const yesStat = document.getElementById('bias-yes-stat');
+  const noStat  = document.getElementById('bias-no-stat');
+  if (yesStat) yesStat.textContent = biasStr(yesBuys, yesWins, yesSells.length, yesPnl);
+  if (noStat)  noStat.textContent  = biasStr(noBuys,  noWins,  noSells.length,  noPnl);
+
+  // Exit attribution
+  const exitEl = document.getElementById('exit-attr-rows');
+  if (!exitEl) return;
+  const sells = allTrades.filter(t => t.event === 'sell');
+  if (!sells.length) { exitEl.innerHTML = '<div class="exit-attr-row"><span class="exit-attr-key">No closed trades yet</span></div>'; return; }
+
+  // Group by reason
+  const byReason = {};
+  sells.forEach(t => {
+    const r = t.reason || 'other';
+    if (!byReason[r]) byReason[r] = { count: 0, pnl: 0, holdMins: [] };
+    byReason[r].count++;
+    byReason[r].pnl += (t.pnl || 0);
+    if (t.entry_time && t.exit_time) {
+      const mins = Math.round((new Date(t.exit_time) - new Date(t.entry_time)) / 60000);
+      byReason[r].holdMins.push(mins);
+    }
+  });
+
+  const ORDER = ['take_profit','trailing_stop','stop_loss','dead_market_expire','manual_exit','other'];
+  const LABELS = { take_profit:'Take Profit', trailing_stop:'Trailing Stop', stop_loss:'Stop Loss',
+                   dead_market_expire:'Dead Market', manual_exit:'Manual', other:'Other' };
+  const COLORS = { take_profit:'tp', stop_loss:'sl', trailing_stop:'sl' };
+
+  let html = '';
+  ORDER.forEach(r => {
+    const g = byReason[r];
+    if (!g) return;
+    const avg = g.holdMins.length ? Math.round(g.holdMins.reduce((a,b)=>a+b,0)/g.holdMins.length) : null;
+    const holdStr = avg != null ? (avg < 60 ? ` · ${avg}m avg` : ` · ${Math.floor(avg/60)}h${avg%60}m avg`) : '';
+    const pnlStr  = g.pnl >= 0 ? '+$'+g.pnl.toFixed(2) : '−$'+Math.abs(g.pnl).toFixed(2);
+    const cls     = COLORS[r] || '';
+    html += `<div class="exit-attr-row">
+      <span class="exit-attr-key">${LABELS[r]||r}${holdStr}</span>
+      <span class="exit-attr-val ${cls}">${g.count}× · ${pnlStr}</span>
+    </div>`;
+  });
+  exitEl.innerHTML = html;
+}
+
+// ─── Live rules snapshot ───────────────────────────────────────────────────────
+function updateRulesSnapshot(d) {
+  const s = d.settings || {};
+  function set(id, val, cls) {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = val; if (cls) el.className = 'rules-val ' + cls; }
+  }
+  set('rule-edge',  s.min_edge_score  != null ? s.min_edge_score  : '—', 'amber');
+  set('rule-sl',    s.stop_loss_pct   != null ? s.stop_loss_pct+'%' : '—', 'red');
+  set('rule-spend', s.max_spend       != null ? '$'+parseFloat(s.max_spend).toFixed(2) : '—', '');
+  set('rule-cap',   s.daily_loss_cap  != null ? '$'+parseFloat(s.daily_loss_cap).toFixed(2) : '—', 'red');
 }
 
 // ─── Chat panel ───────────────────────────────────────────────────────────────
