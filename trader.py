@@ -578,12 +578,19 @@ class TradingEngine:
         if spread_sl_ratio >= 100:
             return reject("spread_exceeds_stop_loss")
 
-        # Score penalty: bad spreads eat into signal quality
-        # 60–100% of SL → -15 pts (strong: margin is too thin, need a big move just to break even)
-        # 30–60%  of SL → -7  pts (mild: manageable but worth discounting)
+        # Score penalty: bad spreads eat into signal quality.
+        # The 60–100% zone is graduated — 97% of stop is meaningfully worse than 61%.
         # <30%    of SL → no penalty (tight spread, full edge retained)
-        if spread_sl_ratio >= 60:
-            spread_penalty = -15
+        # 30–60%  of SL → -7  pts (mild: manageable but worth discounting)
+        # 60–75%  of SL → -12 pts (entering near the edge of profitability)
+        # 75–90%  of SL → -17 pts (stop loss likely on first adverse tick)
+        # 90–100% of SL → -22 pts (barely above hard reject; almost certain early exit)
+        if spread_sl_ratio >= 90:
+            spread_penalty = -22
+        elif spread_sl_ratio >= 75:
+            spread_penalty = -17
+        elif spread_sl_ratio >= 60:
+            spread_penalty = -12
         elif spread_sl_ratio >= 30:
             spread_penalty = -7
         else:
