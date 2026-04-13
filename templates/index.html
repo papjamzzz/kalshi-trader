@@ -209,6 +209,120 @@
   }
 
   /* ══════════════════════════════════════════════════════
+     SIGNAL PIPELINE STRIP
+  ══════════════════════════════════════════════════════ */
+  .pipeline-strip {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .pipe-label, .src-label {
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+    align-self: center;
+  }
+  .pipe-stages {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+  .pipe-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-width: 62px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 6px 10px;
+  }
+  .pipe-stage-ai      { border-color: rgba(245,166,35,0.3); background: rgba(245,166,35,0.05); }
+  .pipe-stage-entered { border-color: rgba(0,213,149,0.3);  background: rgba(0,213,149,0.05); }
+  .pipe-num {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--text);
+  }
+  .pipe-num.green { color: var(--green); }
+  .pipe-num.amber { color: var(--amber); }
+  .pipe-num.red   { color: var(--red); }
+  .pipe-name {
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .pipe-arrow {
+    color: var(--border2);
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+  .pipe-divider {
+    width: 1px;
+    height: 20px;
+    background: var(--border);
+    margin: 0 8px;
+    align-self: center;
+    flex-shrink: 0;
+  }
+  .source-chips {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .src-chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 9px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .src-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+  .src-dot.green  { background: var(--green); box-shadow: 0 0 5px var(--green-glow); }
+  .src-dot.amber  { background: var(--amber); }
+  .src-dot.red    { background: var(--red); }
+  .src-name {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text2);
+    letter-spacing: 0.5px;
+  }
+  .src-val {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: 0.5px;
+  }
+  .src-val.green  { color: var(--green); }
+  .src-val.amber  { color: var(--amber); }
+  .src-val.red    { color: var(--red); }
+
+  /* ══════════════════════════════════════════════════════
      PNL PROGRESS BAR
   ══════════════════════════════════════════════════════ */
   .pnl-bar-row {
@@ -958,6 +1072,91 @@
 </div>
 
 <!-- ════════════════════════════════════════════
+     SIGNAL PIPELINE — filter funnel visualization
+════════════════════════════════════════════ -->
+<div class="pipeline-strip">
+  <span class="pipe-label">SIGNAL PIPELINE</span>
+  <div class="pipe-stages">
+    <div class="pipe-stage" id="pipe-scanned">
+      <div class="pipe-num" id="pipe-n-scanned">—</div>
+      <div class="pipe-name">Scanned</div>
+    </div>
+    <div class="pipe-arrow">▶</div>
+    <div class="pipe-stage" id="pipe-cross">
+      <div class="pipe-num" id="pipe-n-cross">—</div>
+      <div class="pipe-name">Cross Signal</div>
+    </div>
+    <div class="pipe-arrow">▶</div>
+    <div class="pipe-stage" id="pipe-edge">
+      <div class="pipe-num" id="pipe-n-edge">—</div>
+      <div class="pipe-name">Edge Score</div>
+    </div>
+    <div class="pipe-arrow">▶</div>
+    <div class="pipe-stage" id="pipe-volume">
+      <div class="pipe-num" id="pipe-n-volume">—</div>
+      <div class="pipe-name">Volume</div>
+    </div>
+    <div class="pipe-arrow">▶</div>
+    <div class="pipe-stage" id="pipe-direction">
+      <div class="pipe-num" id="pipe-n-direction">—</div>
+      <div class="pipe-name">Direction</div>
+    </div>
+    <div class="pipe-arrow">▶</div>
+    <div class="pipe-stage pipe-stage-ai" id="pipe-ai">
+      <div class="pipe-num amber" id="pipe-n-ai">5/5</div>
+      <div class="pipe-name">5i Gate</div>
+    </div>
+    <div class="pipe-arrow">▶</div>
+    <div class="pipe-stage pipe-stage-entered" id="pipe-entered">
+      <div class="pipe-num green" id="pipe-n-entered">—</div>
+      <div class="pipe-name">Entered</div>
+    </div>
+  </div>
+
+  <div class="pipe-divider"></div>
+
+  <!-- Data sources status -->
+  <div class="source-chips">
+    <span class="src-label">SOURCES</span>
+    <span class="src-chip" id="src-pm">
+      <span class="src-dot"></span>
+      <span class="src-name">Polymarket</span>
+      <span class="src-val" id="src-pm-val">—</span>
+    </span>
+    <span class="src-chip" id="src-pi">
+      <span class="src-dot"></span>
+      <span class="src-name">PredictIt</span>
+      <span class="src-val" id="src-pi-val">—</span>
+    </span>
+    <span class="src-chip" id="src-fed">
+      <span class="src-dot"></span>
+      <span class="src-name">FedWatch</span>
+      <span class="src-val" id="src-fed-val">—</span>
+    </span>
+    <span class="src-chip" id="src-noaa">
+      <span class="src-dot"></span>
+      <span class="src-name">NOAA</span>
+      <span class="src-val" id="src-noaa-val">—</span>
+    </span>
+    <span class="src-chip" id="src-5i">
+      <span class="src-dot green"></span>
+      <span class="src-name">5i Gate</span>
+      <span class="src-val amber">5/5 models</span>
+    </span>
+
+    <div class="pipe-divider"></div>
+
+    <!-- Category P&L -->
+    <span class="src-label">CAT P&amp;L</span>
+    <span class="src-chip" id="cat-crypto"><span class="src-name">crypto</span><span class="src-val" id="cat-crypto-val">—</span></span>
+    <span class="src-chip" id="cat-econ"><span class="src-name">econ</span><span class="src-val" id="cat-econ-val">—</span></span>
+    <span class="src-chip" id="cat-politics"><span class="src-name">politics</span><span class="src-val" id="cat-politics-val">—</span></span>
+    <span class="src-chip" id="cat-weather"><span class="src-name">weather</span><span class="src-val" id="cat-weather-val">—</span></span>
+    <span class="src-chip" id="cat-other"><span class="src-name">other</span><span class="src-val" id="cat-other-val">—</span></span>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════
      DAILY LOSS BAR
 ════════════════════════════════════════════ -->
 <div class="pnl-bar-row">
@@ -1316,8 +1515,93 @@ function updateUI(d) {
   // Diagnostics panel — skip reasons, cross-market freshness, cooldowns
   updateDiagnostics(d);
 
+  // Signal pipeline + sources
+  updatePipeline(d);
+
   // Positions
   renderPositions(d.open_positions || []);
+}
+
+function updatePipeline(d) {
+  const sr      = d.skip_reasons  || {};
+  const cmf     = d.cross_market  || {};
+  const catPnl  = d.category_pnl  || {};
+  const scanned = d.market_count  || 0;
+
+  // ── Filter funnel math ──────────────────────────────────────────────
+  // Work backwards from skip reasons to find how many passed each stage
+  const noSignal  = sr.no_cross_signal       || 0;
+  const edgeLow   = sr.edge_score_low        || 0;
+  const lowVol    = sr.low_volume            || 0;
+  const noDir     = sr.no_direction          || 0;
+  const rejected5i = sr['5i_rejected']       || 0;
+  const sportsBk  = sr.sports_blocked        || 0;
+  const seasonBk  = sr.season_future_blocked || 0;
+  const other     = Object.values(sr).reduce((a,b)=>a+b,0)
+                    - noSignal - edgeLow - lowVol - noDir - rejected5i - sportsBk - seasonBk;
+
+  const afterCross     = scanned - noSignal - sportsBk - seasonBk;
+  const afterEdge      = afterCross - edgeLow;
+  const afterVolume    = afterEdge - lowVol;
+  const afterDirection = afterVolume - noDir;
+  const entered        = d.last_entries || 0;
+
+  function setStage(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = Math.max(0, val);
+  }
+
+  setStage('pipe-n-scanned',   scanned);
+  setStage('pipe-n-cross',     afterCross);
+  setStage('pipe-n-edge',      afterEdge);
+  setStage('pipe-n-volume',    afterVolume);
+  setStage('pipe-n-direction', afterDirection);
+  setStage('pipe-n-entered',   entered);
+
+  // Colour the entered node
+  const entEl = document.getElementById('pipe-n-entered');
+  if (entEl) entEl.className = 'pipe-num' + (entered > 0 ? ' green' : '');
+
+  // ── Data source chips ───────────────────────────────────────────────
+  function setSrc(chipId, dotId, valId, count, ageMin, unit) {
+    const chip = document.getElementById(chipId);
+    const dot  = chip ? chip.querySelector('.src-dot') : null;
+    const val  = document.getElementById(valId);
+    if (!chip) return;
+    const fresh = ageMin !== null && ageMin !== undefined && ageMin < 5;
+    const stale = ageMin !== null && ageMin !== undefined && ageMin >= 10;
+    if (dot) dot.className = 'src-dot' + (count > 0 && fresh ? ' green' : stale ? ' red' : ' amber');
+    if (val) {
+      if (count > 0) {
+        val.textContent = count + (unit||'') + (ageMin !== null && ageMin !== undefined ? ' · '+ageMin+'m' : '');
+        val.className   = 'src-val' + (fresh ? ' green' : stale ? ' red' : '');
+      } else {
+        val.textContent = 'offline';
+        val.className   = 'src-val red';
+      }
+    }
+  }
+
+  setSrc('src-pm',  null, 'src-pm-val',  cmf.polymarket_count  || 0, cmf.polymarket_age_min,  '');
+  setSrc('src-pi',  null, 'src-pi-val',  cmf.predictit_count   || 0, cmf.predictit_age_min,   '');
+  setSrc('src-fed', null, 'src-fed-val', cmf.fedwatch_meetings || 0, 0, ' mtgs');
+  setSrc('src-noaa',null, 'src-noaa-val',cmf.noaa_cities       || 0, 0, ' cities');
+
+  // ── Category P&L chips ──────────────────────────────────────────────
+  ['crypto','econ','politics','weather','other'].forEach(cat => {
+    const el = document.getElementById('cat-'+cat+'-val');
+    if (!el) return;
+    const c = catPnl[cat];
+    if (!c || (c.wins + c.losses) === 0) {
+      el.textContent = '—';
+      el.className   = 'src-val';
+    } else {
+      const wr  = Math.round(c.wins / (c.wins+c.losses) * 100);
+      const pnl = c.pnl >= 0 ? '+$'+c.pnl.toFixed(2) : '-$'+Math.abs(c.pnl).toFixed(2);
+      el.textContent = wr+'% · '+pnl;
+      el.className   = 'src-val' + (c.pnl > 0 ? ' green' : c.pnl < 0 ? ' red' : '');
+    }
+  });
 }
 
 function updateDiagnostics(d) {
@@ -1352,10 +1636,10 @@ function updateDiagnostics(d) {
     const cls = age > 10 ? 'dead' : age > 5 ? 'stale' : '';
     chipHtml += `<span class="cm-chip ${cls}">PM ${age}m ago · ${cmf.polymarket_count||0}</span>`;
   }
-  if (cmf.sportsbook_age_min !== null && cmf.sportsbook_age_min !== undefined) {
-    const age = cmf.sportsbook_age_min;
+  if (cmf.predictit_age_min !== null && cmf.predictit_age_min !== undefined) {
+    const age = cmf.predictit_age_min;
     const cls = age > 10 ? 'dead' : age > 5 ? 'stale' : '';
-    chipHtml += `<span class="cm-chip ${cls}">Books ${age}m ago · ${cmf.sportsbook_count||0}</span>`;
+    chipHtml += `<span class="cm-chip ${cls}">PI ${age}m ago · ${cmf.predictit_count||0}</span>`;
   }
   cm.innerHTML = chipHtml;
 }
