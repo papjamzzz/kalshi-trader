@@ -474,12 +474,21 @@ class TradingEngine:
                 verdict_word = verdict.split()[0].upper().rstrip(".:,") if verdict else ""
 
                 approved = trade_count >= self._5I_MIN_AGREE
+                verdict_tag = '✅ TRADE' if approved else '❌ SKIP'
                 print(
-                    f"  🤖 5i verdict: {trade_count}✓/{skip_count}✗ models → "
-                    f"{'TRADE' if approved else 'SKIP'} | {title[:50]}"
+                    f"  🤖 5i: {trade_count}✓/{skip_count}✗ → {verdict_tag} | {title[:55]}"
                 )
+                # Per-model breakdown — shows which model is the outlier
+                for model, text in results.items():
+                    first = (text or "").strip().split()[0].upper().rstrip(".,:")
+                    reason = (text or "").strip()
+                    # Get second line if available
+                    lines = [l.strip() for l in (text or "").strip().splitlines() if l.strip()]
+                    detail = lines[1][:80] if len(lines) > 1 else lines[0][:80] if lines else ""
+                    icon = "  ✓" if first == "TRADE" else "  ✗"
+                    print(f"     {icon} {model:<10} {detail}")
                 if verdict:
-                    print(f"     Synthesis: {verdict[:120]}")
+                    print(f"     💬 Synthesis: {verdict[:100]}")
                 return approved
 
             except Exception as e:

@@ -79,7 +79,7 @@ def _similarity(a, b):
     return len(wa & wb) / max(len(wa), len(wb))
 
 
-def _best_match(kalshi_title, candidates, key_fn, threshold=0.35):
+def _best_match(kalshi_title, candidates, key_fn, threshold=0.25):
     """Return (best_candidate, similarity_score) or (None, 0)."""
     best, best_sim = None, 0.0
     for c in candidates:

@@ -104,6 +104,11 @@ def _fetch():
     try:
         r = _session.get(CME_URL, timeout=12)
         if r.ok:
+            # CME blocks automated access — returns error JSON, not data
+            text = r.text
+            if "blocked" in text.lower() or "scraping" in text.lower():
+                print(f"  [FedWatch] CME blocks automated access — Fed markets covered by Polymarket instead")
+                return _cache
             data = r.json()
             meetings = _parse(data)
             if meetings:
@@ -112,10 +117,10 @@ def _fetch():
                 print(f"  [FedWatch] {len(meetings)} FOMC meetings loaded")
                 return meetings
             else:
-                print(f"  [FedWatch] parsed 0 meetings — response may have changed format")
+                print(f"  [FedWatch] 0 meetings parsed — Fed markets covered by Polymarket")
     except Exception as e:
         print(f"  [FedWatch] fetch error: {e}")
-    return _cache  # return stale on error — don't break the bot
+    return _cache
 
 
 def get_meetings():
