@@ -38,6 +38,7 @@ import fedwatch
 import noaa
 import ndfd
 import econ_signals
+import coingecko
 
 # ── Shared state — written by bg thread, read by scan ────────────────────────
 _lock       = threading.Lock()
@@ -153,9 +154,10 @@ def start_background_fetcher():
     noaa.start()               # starts NOAA background thread (12h periods)
     ndfd.start()               # starts NDFD background thread (hourly)
     econ_signals.start()       # starts BLS/FRED/GDPNow background thread (4h)
+    coingecko.start()          # starts CoinGecko price feed (3 min refresh)
     threading.Thread(target=_fetch_polymarket, daemon=True).start()
     threading.Thread(target=_fetch_predictit,  daemon=True).start()
-    print("  [Cross] Background prefetch started — Polymarket(90s) / PredictIt(5m) / FedWatch(1h) / NOAA(1h) / NDFD-hourly(1h) / EconSignals(4h)")
+    print("  [Cross] Background prefetch started — Polymarket(90s) / PredictIt(5m) / FedWatch(1h) / NOAA(1h) / NDFD-hourly(1h) / EconSignals(4h) / CoinGecko(3m)")
 
 
 # ── Core edge computation ─────────────────────────────────────────────────────
@@ -198,6 +200,11 @@ def compute_cross_edge(kalshi_market, pm_markets, pi_markets):
         "econ_prob":   None,
         "econ_series": None,
         "econ_detail": None,
+        # CoinGecko
+        "cg_prob":     None,
+        "cg_coin":     None,
+        "cg_price":    None,
+        "cg_detail":   None,
     }
 
     external_probs = []
@@ -295,6 +302,21 @@ def compute_cross_edge(kalshi_market, pm_markets, pi_markets):
         result["sources"].append("EconSignals")
         result["gaps"].append(("EconSignals", gap))
         external_probs.append(ec_p)
+
+    # ── 7. CoinGecko — real-time crypto prices ───────────────────────────────
+    cg = coingecko.match_market(kalshi_market)
+    if cg and cg.get("prob") is not None:
+        cg_p = cg["prob"]
+        gap  = cg_p - kalshi_p
+        result.update(
+            cg_prob=round(cg_p, 4),
+            cg_coin=cg.get("coin"),
+            cg_price=cg.get("price"),
+            cg_detail=cg.get("detail"),
+        )
+        result["sources"].append("CoinGecko")
+        result["gaps"].append(("CoinGecko", gap))
+        external_probs.append(cg_p)
 
     if not external_probs:
         return result

@@ -1438,7 +1438,9 @@ class TradingEngine:
             age_pi  = round((now - cross_market._pi_ts) / 60, 1) if cross_market._pi_ts else None
             import ndfd as ndfd_mod
             import econ_signals as econ_mod
+            import coingecko as cg_mod
             econ_status = econ_mod.status_summary()
+            cg_status   = cg_mod.status_summary()
             cm_freshness = {
                 "polymarket_age_min":  age_pm,
                 "polymarket_count":    len(cross_market._pm_markets),
@@ -1449,6 +1451,10 @@ class TradingEngine:
                 "ndfd_cities":         len(ndfd_mod._hourly),
                 "econ_series":         econ_status.get("series_loaded", 0),
                 "econ_gdpnow":         econ_status.get("gdpnow"),
+                "cg_btc":              cg_status.get("btc_price"),
+                "cg_eth":              cg_status.get("eth_price"),
+                "cg_coins":            cg_status.get("coins_loaded", 0),
+                "cg_age_min":          cg_status.get("age_min"),
             }
         except Exception:
             pass

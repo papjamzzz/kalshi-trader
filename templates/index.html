@@ -1206,6 +1206,11 @@
       <span class="src-name">Econ</span>
       <span class="src-val" id="src-econ-val">—</span>
     </span>
+    <span class="src-chip" id="src-cg">
+      <span class="src-dot"></span>
+      <span class="src-name">CoinGecko</span>
+      <span class="src-val" id="src-cg-val">—</span>
+    </span>
     <span class="src-chip" id="src-5i">
       <span class="src-dot green"></span>
       <span class="src-name">5i Gate</span>
@@ -1756,6 +1761,12 @@ function updatePipeline(d) {
   setSrc('src-noaa',null, 'src-noaa-val',cmf.noaa_cities       || 0, 0, ' cities');
   setSrc('src-ndfd',null, 'src-ndfd-val',cmf.ndfd_cities       || 0, 0, ' cities hourly');
   setSrc('src-econ',null, 'src-econ-val',cmf.econ_series       || 0, 0, ' series');
+  if (cmf.cg_btc) {
+    const el = document.getElementById('src-cg-val');
+    if (el) el.textContent = '$' + Math.round(cmf.cg_btc).toLocaleString();
+    const chip = document.getElementById('src-cg');
+    if (chip) { const dot = chip.querySelector('.src-dot'); if (dot) { dot.classList.remove('amber','red'); dot.classList.add('green'); } }
+  }
 
   // ── Category P&L chips ──────────────────────────────────────────────
   ['crypto','econ','politics','weather','other'].forEach(cat => {
