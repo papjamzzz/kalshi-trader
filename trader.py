@@ -65,8 +65,8 @@ DEFAULT_SETTINGS = {
     "max_positions":   5,       # tight cap while rebuilding trust
     "daily_loss_cap":  5.00,    # $ before bot stops for the day
     "min_volume":      500,     # contracts in pool (game markets have lower volume)
-    "take_profit_pct": 20.0,    # % gain to exit
-    "stop_loss_pct":   15.0,    # % loss to exit (tighter — exit bad trades faster)
+    "take_profit_pct": 10.0,    # % gain to exit (achievable intraday on prediction markets)
+    "stop_loss_pct":   12.0,    # % loss to exit (wrong is wrong, exit fast)
     "min_edge_score":  75.0,    # higher threshold — cross-market bonus must be real
     "scan_interval":   120,     # seconds between scans
     "notify_sms":      False,   # send SMS on trades
@@ -113,6 +113,10 @@ class TradingEngine:
         # Markout tracker — measures adverse selection quality of entries
         # Each completed trade stores midpoint changes at +5s, +15s, +60s
         self._markout_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="markout")
+
+        # Shared market price cache — written by scan loop, read by monitor loop
+        self._latest_markets   = {}
+        self._this_cycle_entries = set()
 
     # ── Persistence ───────────────────────────────────────────────────────────
 
@@ -185,7 +189,9 @@ class TradingEngine:
         self._status_msg = "Running"
         self._thread = threading.Thread(target=self._engine_loop, daemon=True)
         self._thread.start()
-        print("  ✅ KK Trader engine started")
+        self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self._monitor_thread.start()
+        print("  ✅ KK Trader engine started (scan=120s / monitor=10s)")
         notifier.notify_startup(self._last_scan_count)
 
     def stop(self):
@@ -207,15 +213,17 @@ class TradingEngine:
             try:
                 self._daily_check()
                 if not self._daily_limit_hit():
-                    # FIX Bug 1: track tickers entered THIS cycle so _monitor_positions
+                    # FIX Bug 1: track tickers entered THIS cycle so _monitor_loop
                     # doesn't immediately stop-loss them on bid-ask spread in same cycle
                     self._this_cycle_entries = set()
                     self._last_error = None   # clear stale errors on each clean scan cycle
                     markets = self._fetch_markets()
                     self._last_scan = datetime.now().isoformat()
                     self._last_scan_count = len(markets)
+                    # Publish latest market prices for the monitor thread to use
+                    with self._lock:
+                        self._latest_markets = {m.get("ticker"): m for m in markets if m.get("ticker")}
                     self._scan_entries(markets)
-                    self._monitor_positions(markets)
                 else:
                     self._status_msg = "Paused — daily limit hit"
             except Exception as e:
@@ -224,6 +232,24 @@ class TradingEngine:
 
             interval = self._get_scan_interval()
             time.sleep(interval)
+
+    def _monitor_loop(self):
+        """
+        Dedicated position monitor — runs every 10s independent of scan cycle.
+        Decoupled from _engine_loop so TP/SL fires in seconds, not minutes.
+        Uses the latest market price cache updated by the scan loop, and fetches
+        directly from Kalshi if a ticker isn't in the cache.
+        """
+        time.sleep(15)   # let the first scan complete before monitoring starts
+        while self.running:
+            try:
+                if self.positions:
+                    with self._lock:
+                        price_map = dict(self._latest_markets)
+                    self._monitor_positions(price_map)
+            except Exception as e:
+                print(f"  ⚠ Monitor loop error: {e}")
+            time.sleep(10)
 
     def _daily_check(self):
         today = str(date.today())
@@ -1009,26 +1035,38 @@ class TradingEngine:
 
             entry_mid = (yes_bid + yes_ask) / 2.0
 
+            # Compute market remaining life at entry — used by proportional time stop
+            secs_to_close_at_entry = None
+            close_time = m.get("close_time") or m.get("expected_expiration_time")
+            if close_time:
+                try:
+                    from datetime import timezone as _tz
+                    exp = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+                    secs_to_close_at_entry = (exp - datetime.now(_tz.utc)).total_seconds()
+                except Exception:
+                    pass
+
             position = {
-                "ticker":          ticker,
-                "side":            side,
-                "count":           count,
-                "entry_price":     entry_price,
-                "entry_mid":       round(entry_mid, 2),
-                "entry_cost":      actual_cost,
-                "entry_time":      datetime.now().isoformat(),
-                "order_id":        order_id,
-                "edge_score":      score,
-                "title":           m.get("title", ticker),
-                "category":        category,
-                "size_mult":       mult,
-                "sources":         cross_edge.get("sources", []),
-                "peak_pnl_pct":    0.0,
-                "peak_favorable":  0.0,
-                "worst_adverse":   0.0,
-                "markout":         {},
-                "spread_penalty":  spread_penalty,
-                "spread_sl_ratio": spread_sl_ratio,
+                "ticker":                  ticker,
+                "side":                    side,
+                "count":                   count,
+                "entry_price":             entry_price,
+                "entry_mid":               round(entry_mid, 2),
+                "entry_cost":              actual_cost,
+                "entry_time":              datetime.now().isoformat(),
+                "order_id":                order_id,
+                "edge_score":              score,
+                "title":                   m.get("title", ticker),
+                "category":                category,
+                "size_mult":               mult,
+                "sources":                 cross_edge.get("sources", []),
+                "peak_pnl_pct":            0.0,
+                "peak_favorable":          0.0,
+                "worst_adverse":           0.0,
+                "markout":                 {},
+                "spread_penalty":          spread_penalty,
+                "spread_sl_ratio":         spread_sl_ratio,
+                "secs_to_close_at_entry":  secs_to_close_at_entry,
             }
             with self._lock:
                 self.positions[ticker] = position
@@ -1112,33 +1150,32 @@ class TradingEngine:
 
     # ── Exit Logic ────────────────────────────────────────────────────────────
 
-    def _monitor_positions(self, markets):
+    def _monitor_positions(self, price_map):
+        """
+        Called by _monitor_loop every 10s with a pre-built {ticker: market} dict.
+        Checks TP / trailing stop / SL / proportional time stop / expiry window.
+        """
         if not self.positions:
             return
 
         s = self.settings
-        take_profit = s.get("take_profit_pct", 18.0)
-        # SL is type-aware: sports game markets need 22% breathing room (noisy);
-        # event markets (TV, elections, corporate) use tighter 12% — wrong = wrong, exit fast
-        _base_sl    = s.get("stop_loss_pct", 20.0)
+        take_profit = s.get("take_profit_pct", 10.0)   # lowered: 10% is achievable intraday
+        _base_sl    = s.get("stop_loss_pct", 12.0)     # tighter: wrong is wrong, exit fast
 
-        # Build market price lookup from current scan
-        price_map = {m.get("ticker"): m for m in markets if m.get("ticker")}
+        from datetime import timezone as _tz
 
         for ticker, pos in list(self.positions.items()):
-            # FIX Bug 1: skip positions entered in this scan cycle — the bot was
-            # buying at the ask then immediately stopping out on its own spread
-            # because _monitor_positions ran before the market could reprice.
+            # Grace period: skip tickers entered this scan cycle (bid-ask spread protection)
             if hasattr(self, "_this_cycle_entries") and ticker in self._this_cycle_entries:
                 continue
 
-            # Also enforce a time-based grace period: never exit within 3 minutes
-            # of entry (handles the same problem across restarts)
+            # Hard 3-minute grace period (handles restarts too)
             entry_time_str = pos.get("entry_time", "")
+            secs_held = 0
             if entry_time_str:
                 try:
                     entered_at = datetime.fromisoformat(entry_time_str)
-                    secs_held = (datetime.now() - entered_at).total_seconds()
+                    secs_held  = (datetime.now() - entered_at).total_seconds()
                     if secs_held < 180:
                         continue
                 except Exception:
@@ -1146,14 +1183,13 @@ class TradingEngine:
 
             current_market = price_map.get(ticker)
 
-            # Fetch fresh price if not in current scan
+            # Fetch fresh price if not in latest scan cache
             if not current_market:
                 raw = kapi.get_market(ticker)
                 if raw:
                     current_market = raw
 
             if not current_market:
-                # Market not found — likely expired/closed. In paper mode, force-exit at entry.
                 if PAPER_TRADING:
                     entry_p = pos["entry_price"]
                     cat = pos.get("category", "other")
@@ -1165,49 +1201,68 @@ class TradingEngine:
             yes_ask = current_market.get("yes_ask", 0)
             side    = pos["side"]
 
-            # Current price for our side
-            if side == "yes":
-                current_price = yes_bid  # can sell YES at the bid
-            else:
-                current_price = 100 - yes_ask  # NO price = 100 - yes_ask
-
+            current_price = yes_bid if side == "yes" else (100 - yes_ask)
             pnl_pct = kapi.pnl_pct(pos["entry_price"], current_price)
 
-            # Type-aware stop loss: sports games get wider room (noisy markets),
-            # event markets use full base stop loss (relative spread filter now prevents
-            # entering illiquid markets where spread alone > 30% of price)
             is_sports = self._is_sports_game(ticker)
             stop_loss = _base_sl * 1.4 if is_sports else _base_sl
 
-            # Take profit
+            # ── Take profit ───────────────────────────────────────────────────
             if pnl_pct >= take_profit:
                 self._exit_position(ticker, pos, current_price, "take_profit")
                 continue
 
-            # Trailing stop: if we've ever been up 12%+, don't give back more than half
+            # ── Trailing stop: protect gains ≥ 6% — don't give back more than half ──
             peak = pos.get("peak_pnl_pct", 0.0)
             if pnl_pct > peak:
                 with self._lock:
                     self.positions[ticker]["peak_pnl_pct"] = pnl_pct
                 peak = pnl_pct
-            if peak >= 12.0 and pnl_pct < (peak * 0.45):
+            if peak >= 6.0 and pnl_pct < (peak * 0.45):
                 self._exit_position(ticker, pos, current_price, "trailing_stop")
                 continue
 
-            # Stop loss
+            # ── Stop loss ─────────────────────────────────────────────────────
             if pnl_pct <= -stop_loss:
                 self._exit_position(ticker, pos, current_price, "stop_loss")
                 continue
 
-            # Pre-game exit for sports: close 1h before game start (market close)
-            # This locks in any pre-game drift and avoids in-game volatility.
-            # Event markets (TV releases, elections) get standard 2h window.
+            # ── Proportional time stop ────────────────────────────────────────
+            # If we've used >40% of the market's remaining life at entry and P&L
+            # is stuck flat (-5% to +3%), the edge has likely already been priced
+            # in or was never real. Exit and free the capital.
+            # NOT applied to sports (noisy by nature) or markets <30min to close
+            # (the expiry window below handles those).
             close_time = current_market.get("close_time") or current_market.get("expected_expiration_time")
+            if close_time and not is_sports and secs_held > 180:
+                try:
+                    exp = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+                    now_utc = datetime.now(_tz.utc)
+                    secs_to_close  = (exp - now_utc).total_seconds()
+                    life_at_entry  = pos.get("secs_to_close_at_entry")   # stored on entry
+
+                    if life_at_entry and life_at_entry > 1800:   # only for markets >30min horizon
+                        pct_life_used = secs_held / life_at_entry
+                        is_stuck = -5.0 <= pnl_pct <= 3.0
+                        if pct_life_used >= 0.40 and is_stuck:
+                            cat = pos.get("category", "")
+                            print(
+                                f"  ⏱ time_stop: {ticker} [{cat}] — "
+                                f"{pct_life_used*100:.0f}% of market life used, "
+                                f"P&L stuck at {pnl_pct:+.1f}%"
+                            )
+                            self._exit_position(ticker, pos, current_price, "time_stop")
+                            continue
+                except Exception:
+                    pass
+
+            # ── Expiry window exit ────────────────────────────────────────────
+            # Sports: exit 1h before close (avoid in-game volatility)
+            # All others: exit 2h before close (lock in drift, avoid resolution noise)
             if close_time:
                 try:
                     exp = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
-                    from datetime import timezone
-                    hours_left = (exp - datetime.now(timezone.utc)).total_seconds() / 3600
+                    hours_left = (exp - datetime.now(_tz.utc)).total_seconds() / 3600
                     exit_window = 1.0 if is_sports else 2.0
                     if hours_left < exit_window:
                         reason = "take_profit" if pnl_pct > 0 else "expiry_exit"
