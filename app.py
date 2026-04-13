@@ -74,6 +74,24 @@ def bot_stop():
     return jsonify({"ok": True, "status": "stopped"})
 
 
+@app.route("/api/reset-paper", methods=["POST"])
+@_require_token
+def reset_paper():
+    """Clear all paper positions and reset daily P&L. Paper mode only."""
+    from trader import PAPER_TRADING
+    if not PAPER_TRADING:
+        return jsonify({"ok": False, "error": "Only available in paper mode"}), 400
+    with engine._lock:
+        count = len(engine.positions)
+        engine.positions.clear()
+        engine._daily_pnl = 0.0
+        engine._wins = 0
+        engine._losses = 0
+        engine._status_msg = "Paper reset — positions cleared"
+    print(f"  🗑 Paper reset: cleared {count} positions, zeroed daily P&L")
+    return jsonify({"ok": True, "cleared": count})
+
+
 # ── Data ──────────────────────────────────────────────────────────────────────
 
 @app.route("/api/status")

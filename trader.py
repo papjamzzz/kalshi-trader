@@ -563,11 +563,19 @@ class TradingEngine:
         if likely_entry < 15:
             return reject("price_below_floor")
 
-        # Spread check
+        # Spread check — absolute AND profitability check
         spread = yes_ask - yes_bid
         max_spread = 18 if cross_signal else 25
         if spread > max_spread:
             return reject("spread_too_wide")
+        # Immediate-loss guard: entering at ask/bid means instant P&L = spread/entry.
+        # If that loss already exceeds stop_loss, we'd stop out the moment the grace period ends.
+        base_sl = s.get("stop_loss_pct", 20.0)
+        entry_p = likely_entry
+        if entry_p > 0:
+            immediate_loss_pct = (spread / entry_p) * 100
+            if immediate_loss_pct >= base_sl:
+                return reject("spread_exceeds_stop_loss")
 
         # Time to expiry
         close_time = m.get("close_time") or m.get("expected_expiration_time")
@@ -834,6 +842,11 @@ class TradingEngine:
                     current_market = raw
 
             if not current_market:
+                # Market not found — likely expired/closed. In paper mode, force-exit at entry.
+                if PAPER_TRADING:
+                    entry_p = pos["entry_price"]
+                    print(f"  🗑 {ticker}: market gone, paper-closing at entry ({entry_p}¢)")
+                    self._exit_position(ticker, pos, entry_p, "expired")
                 continue
 
             yes_bid = current_market.get("yes_bid", 0)
@@ -849,9 +862,10 @@ class TradingEngine:
             pnl_pct = kapi.pnl_pct(pos["entry_price"], current_price)
 
             # Type-aware stop loss: sports games get wider room (noisy markets),
-            # event markets (TV/elections/corporate) get tighter cutoff
+            # event markets use full base stop loss (relative spread filter now prevents
+            # entering illiquid markets where spread alone > 30% of price)
             is_sports = self._is_sports_game(ticker)
-            stop_loss = _base_sl * 1.4 if is_sports else _base_sl * 0.7
+            stop_loss = _base_sl * 1.4 if is_sports else _base_sl
 
             # Take profit
             if pnl_pct >= take_profit:
