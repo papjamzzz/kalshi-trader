@@ -164,8 +164,22 @@
     grid-template-columns: repeat(6, 1fr);
     border-bottom: 1px solid var(--border2);
   }
+  .metric-strip-2 .metric {
+    padding: 16px 20px;
+  }
+  .metric-strip-2 .metric-value {
+    font-size: 36px;
+  }
+  .metric-strip-2 .metric-label {
+    font-size: 11px;
+    margin-bottom: 6px;
+  }
+  .metric-strip-2 .metric-sub {
+    font-size: 11px;
+    margin-top: 6px;
+  }
   .metric {
-    padding: 18px 24px;
+    padding: 28px 28px;
     border-right: 1px solid var(--border2);
     position: relative;
     overflow: hidden;
@@ -184,16 +198,16 @@
   .metric.blue::before  { background: var(--blue); }
   .metric.amber::before { background: var(--amber); }
   .metric-label {
-    font-size: 10px;
+    font-size: 13px;
     font-family: var(--mono);
     font-weight: 700;
-    letter-spacing: 2px;
+    letter-spacing: 2.5px;
     text-transform: uppercase;
     color: #ffffff;
-    margin-bottom: 8px;
+    margin-bottom: 12px;
   }
   .metric-value {
-    font-size: 40px;
+    font-size: 64px;
     font-weight: 900;
     line-height: 1;
     color: #ffffff;
@@ -204,10 +218,10 @@
   .metric-value.blue  { color: var(--blue); }
   .metric-value.amber { color: var(--amber); }
   .metric-sub {
-    font-size: 11px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--text2);
-    margin-top: 4px;
+    margin-top: 10px;
     font-family: var(--mono);
   }
 
@@ -217,10 +231,10 @@
   .pipeline-strip {
     background: var(--surface);
     border-bottom: 1px solid var(--border2);
-    padding: 14px 24px;
+    padding: 22px 28px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 18px;
   }
   .pipe-label, .src-label {
     font-family: var(--mono);
@@ -242,18 +256,18 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
-    min-width: 80px;
+    gap: 7px;
+    min-width: 110px;
     background: var(--card);
     border: 1px solid var(--border2);
-    border-radius: 6px;
-    padding: 10px 14px;
+    border-radius: 8px;
+    padding: 16px 22px;
   }
   .pipe-stage-ai      { border-color: rgba(245,166,35,0.4); background: rgba(245,166,35,0.07); }
   .pipe-stage-entered { border-color: rgba(0,213,149,0.4);  background: rgba(0,213,149,0.07); }
   .pipe-num {
     font-family: var(--mono);
-    font-size: 26px;
+    font-size: 42px;
     font-weight: 900;
     line-height: 1;
     color: #ffffff;
@@ -263,7 +277,7 @@
   .pipe-num.red   { color: var(--red); }
   .pipe-name {
     font-family: var(--mono);
-    font-size: 9px;
+    font-size: 13px;
     font-weight: 700;
     letter-spacing: 1.5px;
     text-transform: uppercase;
@@ -294,11 +308,11 @@
   .src-chip {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     background: var(--card);
     border: 1px solid var(--border2);
-    border-radius: 5px;
-    padding: 6px 12px;
+    border-radius: 6px;
+    padding: 10px 18px;
     white-space: nowrap;
     flex-shrink: 0;
   }
@@ -314,14 +328,14 @@
   .src-dot.red    { background: var(--red); }
   .src-name {
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 15px;
     font-weight: 700;
     color: #ffffff;
     letter-spacing: 0.5px;
   }
   .src-val {
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 15px;
     font-weight: 600;
     color: var(--text2);
     letter-spacing: 0.5px;
@@ -336,15 +350,15 @@
   .pnl-bar-row {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 20px;
+    gap: 16px;
+    padding: 16px 28px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
   }
-  .pnl-bar-label { font-family: var(--mono); font-size: 11px; font-weight: 700; color: #ffffff; white-space: nowrap; }
-  .pnl-bar-track { flex: 1; height: 5px; background: var(--dim); border-radius: 3px; overflow: hidden; }
+  .pnl-bar-label { font-family: var(--mono); font-size: 15px; font-weight: 700; color: #ffffff; white-space: nowrap; }
+  .pnl-bar-track { flex: 1; height: 8px; background: var(--dim); border-radius: 4px; overflow: hidden; }
   .pnl-bar-fill  { height: 100%; border-radius: 3px; transition: width 0.6s ease, background 0.3s; }
-  .pnl-bar-pct   { font-family: var(--mono); font-size: 11px; font-weight: 700; color: #ffffff; width: 44px; text-align: right; }
+  .pnl-bar-pct   { font-family: var(--mono); font-size: 15px; font-weight: 700; color: #ffffff; width: 52px; text-align: right; }
 
   /* ══════════════════════════════════════════════════════
      MAIN LAYOUT
@@ -352,7 +366,7 @@
   .layout {
     display: grid;
     grid-template-columns: 300px 1fr;
-    height: calc(100vh - 113px);
+    height: 45vh;
     overflow: hidden;
   }
 
@@ -396,7 +410,7 @@
   .fader-scroll { overflow-y: auto; flex: 1; }
 
   .fader-strip {
-    padding: 12px 16px;
+    padding: 7px 16px;
     border-bottom: 1px solid var(--border);
     transition: background 0.15s;
   }
@@ -811,89 +825,11 @@
     padding: 2px 6px;
     border-radius: 3px;
   }
-  .reason-badge.take_profit        { background: var(--green-dim); color: var(--green); }
-  .reason-badge.stop_loss          { background: var(--red-dim);   color: var(--red); }
-  .reason-badge.expiry_exit        { background: var(--amber-dim); color: var(--amber); }
-  .reason-badge.dead_market_expire { background: rgba(160,80,200,0.1); color: #c084fc; border: 1px solid rgba(192,132,252,0.2); }
-  .reason-badge.trailing_stop      { background: rgba(245,166,35,0.1); color: var(--amber); border: 1px solid rgba(245,166,35,0.2); }
-  .reason-badge.manual_exit        { background: rgba(180,180,180,0.1); color: var(--text2); border: 1px solid rgba(180,180,180,0.2); }
-  .reason-badge.buy                { background: var(--blue-dim);  color: var(--blue); }
-
-  /* Score flow: raw → final */
-  .score-flow {
-    font-family: var(--mono);
-    font-size: 9px;
-    color: var(--text2);
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    margin-top: 2px;
-  }
-  .score-raw  { color: var(--muted); }
-  .score-arrow{ color: var(--dim); }
-  .score-final{ color: var(--amber); font-weight: 700; }
-  .score-final.good { color: var(--green); }
-  .score-final.clean{ color: var(--text2); }
-
-  /* Spread ratio badge */
-  .spr-badge {
-    display: inline-block;
-    font-family: var(--mono);
-    font-size: 8px;
-    font-weight: 700;
-    padding: 1px 5px;
-    border-radius: 3px;
-    margin-top: 2px;
-  }
-  .spr-clean  { background: rgba(0,213,149,0.1);   color: var(--green);  border: 1px solid rgba(0,213,149,0.2); }
-  .spr-mild   { background: rgba(245,166,35,0.1);  color: var(--amber);  border: 1px solid rgba(245,166,35,0.2); }
-  .spr-strong { background: rgba(246,110,50,0.12); color: #f97316;       border: 1px solid rgba(249,115,22,0.25); }
-  .spr-danger { background: rgba(246,70,93,0.1);   color: var(--red);    border: 1px solid rgba(246,70,93,0.2); }
-
-  /* Side bias chips */
-  .bias-row { display: flex; align-items: center; gap: 10px; }
-  .bias-blk {
-    display: flex; flex-direction: column; gap: 2px;
-    background: var(--card); border: 1px solid var(--border2);
-    border-radius: 5px; padding: 5px 10px; min-width: 140px;
-  }
-  .bias-head {
-    font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px;
-    text-transform: uppercase; color: var(--muted); margin-bottom: 2px;
-  }
-  .bias-line {
-    font-family: var(--mono); font-size: 10px; color: var(--text2);
-    display: flex; justify-content: space-between; gap: 12px;
-  }
-  .bias-line .lbl { color: var(--muted); }
-  .bias-line .val { font-weight: 700; }
-  .bias-line .val.yes { color: var(--green); }
-  .bias-line .val.no  { color: var(--red); }
-
-  /* Exit attribution */
-  .exit-attr-rows { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
-  .exit-attr-row  { display: flex; justify-content: space-between; }
-  .exit-attr-key  { font-family: var(--mono); font-size: 9px; color: var(--text2); }
-  .exit-attr-val  { font-family: var(--mono); font-size: 9px; font-weight: 700; color: var(--amber); }
-  .exit-attr-val.tp { color: var(--green); }
-  .exit-attr-val.sl { color: var(--red); }
-
-  /* Live rules snapshot */
-  .rules-block {
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--border);
-  }
-  .rules-label {
-    font-family: var(--mono); font-size: 9px; letter-spacing: 2px;
-    text-transform: uppercase; color: var(--muted); margin-bottom: 6px;
-  }
-  .rules-rows { display: flex; flex-direction: column; gap: 3px; }
-  .rules-row  { display: flex; justify-content: space-between; align-items: center; }
-  .rules-key  { font-family: var(--mono); font-size: 9px; color: var(--text2); }
-  .rules-val  { font-family: var(--mono); font-size: 9px; font-weight: 700; color: var(--green); }
-  .rules-val.amber { color: var(--amber); }
-  .rules-val.red   { color: var(--red); }
-  .rules-val.dim   { color: var(--muted); }
+  .reason-badge.take_profit  { background: var(--green-dim); color: var(--green); }
+  .reason-badge.stop_loss    { background: var(--red-dim);   color: var(--red); }
+  .reason-badge.expiry_exit  { background: var(--amber-dim); color: var(--amber); }
+  .reason-badge.manual_exit  { background: rgba(180,180,180,0.1); color: var(--text2); border: 1px solid rgba(180,180,180,0.2); }
+  .reason-badge.buy          { background: var(--blue-dim);  color: var(--blue); }
 
   /* Empty state */
   .empty-state {
@@ -1158,6 +1094,42 @@
 </div>
 
 <!-- ════════════════════════════════════════════
+     METRICS ROW 2
+════════════════════════════════════════════ -->
+<div class="metric-strip metric-strip-2">
+  <div class="metric green">
+    <div class="metric-label">Win Rate</div>
+    <div class="metric-value green" id="stat-winrate-pct">—</div>
+    <div class="metric-sub" id="stat-wr-sub">no closes yet</div>
+  </div>
+  <div class="metric amber">
+    <div class="metric-label">CLV Rate</div>
+    <div class="metric-value amber" id="stat-clv-rate">—</div>
+    <div class="metric-sub" id="stat-clv-sub">closing line value</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">Avg P&L / Trade</div>
+    <div class="metric-value" id="stat-avg-pnl">—</div>
+    <div class="metric-sub">per closed trade</div>
+  </div>
+  <div class="metric red">
+    <div class="metric-label">Spread Blocked</div>
+    <div class="metric-value red" id="stat-spread-blocked">—</div>
+    <div class="metric-sub" id="stat-spread-sub">today</div>
+  </div>
+  <div class="metric blue">
+    <div class="metric-label">Fresh Signals</div>
+    <div class="metric-value blue" id="stat-fresh-signals">—</div>
+    <div class="metric-sub">injury / events</div>
+  </div>
+  <div class="metric amber">
+    <div class="metric-label">High Impact</div>
+    <div class="metric-value amber" id="stat-high-impact">—</div>
+    <div class="metric-sub">events tracked</div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════
      SIGNAL PIPELINE — filter funnel visualization
 ════════════════════════════════════════════ -->
 <div class="pipeline-strip">
@@ -1224,27 +1196,21 @@
       <span class="src-name">NOAA</span>
       <span class="src-val" id="src-noaa-val">—</span>
     </span>
+    <span class="src-chip" id="src-ndfd">
+      <span class="src-dot"></span>
+      <span class="src-name">NDFD</span>
+      <span class="src-val" id="src-ndfd-val">—</span>
+    </span>
+    <span class="src-chip" id="src-econ">
+      <span class="src-dot"></span>
+      <span class="src-name">Econ</span>
+      <span class="src-val" id="src-econ-val">—</span>
+    </span>
     <span class="src-chip" id="src-5i">
       <span class="src-dot green"></span>
       <span class="src-name">5i Gate</span>
-      <span class="src-val amber">4/5 models</span>
+      <span class="src-val amber">5/5 models</span>
     </span>
-
-    <div class="pipe-divider"></div>
-
-    <!-- Side Bias -->
-    <div class="bias-row">
-      <div class="bias-blk">
-        <div class="bias-head">Side Bias</div>
-        <div class="bias-line"><span class="lbl">YES</span><span class="val yes" id="bias-yes-stat">—</span></div>
-        <div class="bias-line"><span class="lbl">NO&nbsp;</span><span class="val no"  id="bias-no-stat">—</span></div>
-      </div>
-      <div class="bias-blk">
-        <div class="bias-head">Spread Impact</div>
-        <div class="bias-line"><span class="lbl">Blocked</span><span class="val" id="spr-blocked" style="color:var(--red)">—</span></div>
-        <div class="bias-line"><span class="lbl">Entered w/ penalty</span><span class="val" id="spr-downgraded" style="color:var(--amber)">—</span></div>
-      </div>
-    </div>
 
     <div class="pipe-divider"></div>
 
@@ -1255,6 +1221,41 @@
     <span class="src-chip" id="cat-politics"><span class="src-name">politics</span><span class="src-val" id="cat-politics-val">—</span></span>
     <span class="src-chip" id="cat-weather"><span class="src-name">weather</span><span class="src-val" id="cat-weather-val">—</span></span>
     <span class="src-chip" id="cat-other"><span class="src-name">other</span><span class="src-val" id="cat-other-val">—</span></span>
+  </div>
+
+  <!-- Markout row -->
+  <div class="source-chips" id="markout-row">
+    <span class="src-label">MARKOUT</span>
+    <span class="src-chip">
+      <span class="src-name">+5s</span>
+      <span class="src-val" id="mo-5s">—</span>
+    </span>
+    <span class="src-chip">
+      <span class="src-name">+15s</span>
+      <span class="src-val" id="mo-15s">—</span>
+    </span>
+    <span class="src-chip">
+      <span class="src-name">+60s</span>
+      <span class="src-val" id="mo-60s">—</span>
+    </span>
+    <div class="pipe-divider"></div>
+    <span class="src-chip">
+      <span class="src-name">Peak Fav</span>
+      <span class="src-val green" id="mo-peak">—</span>
+    </span>
+    <span class="src-chip">
+      <span class="src-name">Worst Adv</span>
+      <span class="src-val red" id="mo-worst">—</span>
+    </span>
+    <div class="pipe-divider"></div>
+    <span class="src-chip">
+      <span class="src-name">Trades w/ data</span>
+      <span class="src-val" id="mo-n">—</span>
+    </span>
+    <span class="src-chip mo-interp" id="mo-verdict-chip" style="display:none">
+      <span class="src-name">Signal</span>
+      <span class="src-val" id="mo-verdict">—</span>
+    </span>
   </div>
 </div>
 
@@ -1406,21 +1407,6 @@
         <div class="fader-desc" style="margin-top:6px">Requires Twilio / Gmail creds in .env</div>
       </div>
 
-      <!-- Live Rules Snapshot -->
-      <div class="rules-block">
-        <div class="rules-label">Live Rules</div>
-        <div class="rules-rows" id="rules-rows">
-          <div class="rules-row"><span class="rules-key">Min edge score</span><span class="rules-val amber" id="rule-edge">—</span></div>
-          <div class="rules-row"><span class="rules-key">Stop loss</span><span class="rules-val red" id="rule-sl">—</span></div>
-          <div class="rules-row"><span class="rules-key">Spread hard reject</span><span class="rules-val dim">≥100% of SL</span></div>
-          <div class="rules-row"><span class="rules-key">Spread penalty tiers</span><span class="rules-val dim">30/60/75/90%</span></div>
-          <div class="rules-row"><span class="rules-key">5i threshold</span><span class="rules-val amber">3/4 models</span></div>
-          <div class="rules-row"><span class="rules-key">Sports markets</span><span class="rules-val red">blocked</span></div>
-          <div class="rules-row"><span class="rules-key">Max spend/trade</span><span class="rules-val" id="rule-spend">—</span></div>
-          <div class="rules-row"><span class="rules-key">Daily cap</span><span class="rules-val red" id="rule-cap">—</span></div>
-        </div>
-      </div>
-
       <button class="apply-btn" onclick="saveSettings()">↑ Apply Settings</button>
       <div class="apply-feedback" id="save-feedback"></div>
 
@@ -1444,12 +1430,6 @@
         <div class="diag-row"><span class="diag-key">Waiting for first scan…</span></div>
       </div>
       <div class="cm-fresh-row" id="cm-fresh-row"></div>
-
-      <!-- Exit attribution -->
-      <div class="diag-label" style="margin-top:8px">Exit Breakdown</div>
-      <div class="exit-attr-rows" id="exit-attr-rows">
-        <div class="exit-attr-row"><span class="exit-attr-key">No closed trades yet</span></div>
-      </div>
     </div>
 
   </div><!-- /left-panel -->
@@ -1613,6 +1593,34 @@ function updateUI(d) {
   document.getElementById('stat-pnl-sub').textContent = total > 0
     ? wins+'W / '+losses+'L · '+Math.round(wins/total*100)+'%' : '—';
 
+  // ── Row 2 metrics ──────────────────────────────────────────────────
+  const winRatePct = total > 0 ? Math.round(wins/total*100) : null;
+  const wrEl = document.getElementById('stat-winrate-pct');
+  wrEl.textContent = winRatePct !== null ? winRatePct+'%' : '—';
+  wrEl.className = 'metric-value' + (winRatePct === null ? '' : winRatePct >= 55 ? ' green' : winRatePct >= 45 ? ' amber' : ' red');
+
+  const clv = d.clv || {};
+  const clvRate = clv.clv_rate_pct || 0;
+  const clvEl = document.getElementById('stat-clv-rate');
+  clvEl.textContent = clv.total > 0 ? Math.round(clvRate)+'%' : '—';
+  clvEl.className = 'metric-value' + (clv.total > 0 ? clvRate > 50 ? ' green' : clvRate > 35 ? ' amber' : ' red' : '');
+  document.getElementById('stat-clv-sub').textContent = clv.total > 0 ? clv.total+' settled · avg '+((clv.avg_clv_cents||0)/100).toFixed(2)+'¢' : 'closing line value';
+
+  const avgPnl = total > 0 ? pnl / total : null;
+  const avgEl = document.getElementById('stat-avg-pnl');
+  avgEl.textContent = avgPnl !== null ? (avgPnl>=0?'+':'')+avgPnl.toFixed(2) : '—';
+  avgEl.className = 'metric-value' + (avgPnl === null ? '' : avgPnl > 0 ? ' green' : avgPnl < 0 ? ' red' : '');
+
+  const spread = d.spread_attribution || {};
+  const blocked = spread.blocked_today || 0;
+  const downgraded = spread.downgraded_entered || 0;
+  document.getElementById('stat-spread-blocked').textContent = blocked;
+  document.getElementById('stat-spread-sub').textContent = downgraded > 0 ? downgraded+' entered w/ penalty' : 'zero penalties today';
+
+  const inj = d.injury || {};
+  document.getElementById('stat-fresh-signals').textContent = inj.fresh_signals != null ? inj.fresh_signals : '—';
+  document.getElementById('stat-high-impact').textContent = inj.high_impact != null ? inj.high_impact : '—';
+
   // P&L bar
   const cap  = (d.settings||{}).daily_loss_cap || 50;
   const loss = Math.abs(Math.min(pnl, 0));
@@ -1638,14 +1646,11 @@ function updateUI(d) {
   // Diagnostics panel — skip reasons, cross-market freshness, cooldowns
   updateDiagnostics(d);
 
-  // Signal pipeline + sources + side bias + spread impact
+  // Signal pipeline + sources
   updatePipeline(d);
 
-  // Side bias, exit attribution, spread stats
-  updateInsights(d);
-
-  // Live rules snapshot
-  updateRulesSnapshot(d);
+  // Markout / adverse selection
+  updateMarkout(d);
 
   // Positions
   renderPositions(d.open_positions || []);
@@ -1658,36 +1663,70 @@ function updatePipeline(d) {
   const scanned = d.market_count  || 0;
 
   // ── Filter funnel math ──────────────────────────────────────────────
-  // Work backwards from skip reasons to find how many passed each stage
-  const noSignal  = sr.no_cross_signal       || 0;
-  const edgeLow   = sr.edge_score_low        || 0;
-  const lowVol    = sr.low_volume            || 0;
-  const noDir     = sr.no_direction          || 0;
-  const rejected5i = sr['5i_rejected']       || 0;
-  const sportsBk  = sr.sports_blocked        || 0;
-  const seasonBk  = sr.season_future_blocked || 0;
-  const other     = Object.values(sr).reduce((a,b)=>a+b,0)
-                    - noSignal - edgeLow - lowVol - noDir - rejected5i - sportsBk - seasonBk;
+  // Map every skip_reason key to the correct pipeline stage it exits at.
+  // Order mirrors _should_enter() in trader.py exactly.
 
-  const afterCross     = scanned - noSignal - sportsBk - seasonBk;
-  const afterEdge      = afterCross - edgeLow;
-  const afterVolume    = afterEdge - lowVol;
-  const afterDirection = afterVolume - noDir;
+  // Stage 1 → Cross Signal: sports, already_held, cooldown, no signal, conflicted
+  const dropCross = (sr.sports_blocked          || 0)
+                  + (sr.season_future_blocked   || 0)
+                  + (sr.already_held            || 0)
+                  + (sr.stop_loss_cooldown      || 0)
+                  + (sr.no_cross_signal         || 0)
+                  + (sr.conflicted_cross_signal || 0)
+                  + (sr.no_ticker               || 0);
+
+  // Stage 2 → Edge Score: low score (after spread penalty applied)
+  const dropEdge  = (sr.edge_score_low          || 0);
+
+  // Stage 3 → Volume: vol, price, spread filters
+  const dropVolume = (sr.low_volume             || 0)
+                   + (sr.no_price_data          || 0)
+                   + (sr.price_below_floor      || 0)
+                   + (sr.spread_too_wide        || 0)
+                   + (sr.spread_exceeds_stop_loss || 0)
+                   + (sr.expiring_soon          || 0)
+                   + (sr.event_cap              || 0);
+
+  // Stage 4 → Direction
+  const dropDir   = (sr.no_direction            || 0);
+
+  // Stage 5 → 5i Gate
+  const drop5i    = (sr['5i_rejected']          || 0);
+
+  const totalDropped = dropCross + dropEdge + dropVolume + dropDir + drop5i;
+  const hasScanData  = scanned > 0 && (totalDropped > 0 || (d.last_entries || 0) > 0);
+
+  const afterCross     = scanned - dropCross;
+  const afterEdge      = afterCross - dropEdge;
+  const afterVolume    = afterEdge - dropVolume;
+  const afterDirection = afterVolume - dropDir;
+  const after5i        = afterDirection - drop5i;
   const entered        = d.last_entries || 0;
 
-  function setStage(id, val) {
+  function setStage(id, val, forceStr) {
     const el = document.getElementById(id);
-    if (el) el.textContent = Math.max(0, val);
+    if (!el) return;
+    el.textContent = forceStr !== undefined ? forceStr : (hasScanData ? Math.max(0, val) : '—');
   }
 
-  setStage('pipe-n-scanned',   scanned);
+  setStage('pipe-n-scanned',   scanned,       hasScanData ? scanned : '—');
   setStage('pipe-n-cross',     afterCross);
   setStage('pipe-n-edge',      afterEdge);
   setStage('pipe-n-volume',    afterVolume);
   setStage('pipe-n-direction', afterDirection);
-  setStage('pipe-n-entered',   entered);
+  setStage('pipe-n-entered',   entered,       hasScanData ? entered : '—');
 
-  // Colour the entered node
+  // Colour pipeline nodes based on throughput vs scanned
+  function colourStage(id, val) {
+    const el = document.getElementById(id);
+    if (!el || !hasScanData) return;
+    const ratio = scanned > 0 ? val / scanned : 1;
+    el.className = 'pipe-num' + (ratio > 0.5 ? '' : ratio > 0.1 ? ' amber' : ' red');
+  }
+  colourStage('pipe-n-cross',     afterCross);
+  colourStage('pipe-n-edge',      afterEdge);
+  colourStage('pipe-n-volume',    afterVolume);
+  colourStage('pipe-n-direction', afterDirection);
   const entEl = document.getElementById('pipe-n-entered');
   if (entEl) entEl.className = 'pipe-num' + (entered > 0 ? ' green' : '');
 
@@ -1715,6 +1754,8 @@ function updatePipeline(d) {
   setSrc('src-pi',  null, 'src-pi-val',  cmf.predictit_count   || 0, cmf.predictit_age_min,   '');
   setSrc('src-fed', null, 'src-fed-val', cmf.fedwatch_meetings || 0, 0, ' mtgs');
   setSrc('src-noaa',null, 'src-noaa-val',cmf.noaa_cities       || 0, 0, ' cities');
+  setSrc('src-ndfd',null, 'src-ndfd-val',cmf.ndfd_cities       || 0, 0, ' cities hourly');
+  setSrc('src-econ',null, 'src-econ-val',cmf.econ_series       || 0, 0, ' series');
 
   // ── Category P&L chips ──────────────────────────────────────────────
   ['crypto','econ','politics','weather','other'].forEach(cat => {
@@ -1731,6 +1772,54 @@ function updatePipeline(d) {
       el.className   = 'src-val' + (c.pnl > 0 ? ' green' : c.pnl < 0 ? ' red' : '');
     }
   });
+}
+
+function updateMarkout(d) {
+  const mo = d.markout || {};
+  function fmtMo(val) {
+    if (val === null || val === undefined) return '—';
+    const sign = val > 0 ? '+' : '';
+    return sign + val.toFixed(1) + '¢';
+  }
+  function moClass(val) {
+    if (val === null || val === undefined) return 'src-val';
+    return 'src-val' + (val > 0 ? ' green' : val < 0 ? ' red' : '');
+  }
+
+  const n = mo.n || 0;
+  const el5  = document.getElementById('mo-5s');
+  const el15 = document.getElementById('mo-15s');
+  const el60 = document.getElementById('mo-60s');
+  const elPk = document.getElementById('mo-peak');
+  const elWr = document.getElementById('mo-worst');
+  const elN  = document.getElementById('mo-n');
+
+  if (el5)  { el5.textContent  = fmtMo(mo.avg_5s);  el5.className  = moClass(mo.avg_5s); }
+  if (el15) { el15.textContent = fmtMo(mo.avg_15s); el15.className = moClass(mo.avg_15s); }
+  if (el60) { el60.textContent = fmtMo(mo.avg_60s); el60.className = moClass(mo.avg_60s); }
+  if (elPk) { elPk.textContent = fmtMo(mo.avg_peak_favorable); }
+  if (elWr) { elWr.textContent = fmtMo(mo.avg_worst_adverse); }
+  if (elN)  { elN.textContent  = n > 0 ? n : '—'; }
+
+  // Interpretation verdict
+  const chip    = document.getElementById('mo-verdict-chip');
+  const verdict = document.getElementById('mo-verdict');
+  if (n >= 5 && chip && verdict) {
+    chip.style.display = '';
+    const avg5 = mo.avg_5s;
+    if (avg5 === null || avg5 === undefined) { chip.style.display = 'none'; return; }
+    if (avg5 > 1.5) {
+      verdict.textContent = '✅ Strong edge'; verdict.className = 'src-val green';
+    } else if (avg5 > 0) {
+      verdict.textContent = '↗ Mild edge'; verdict.className = 'src-val amber';
+    } else if (avg5 > -1.5) {
+      verdict.textContent = '↘ Slight adverse'; verdict.className = 'src-val amber';
+    } else {
+      verdict.textContent = '❌ Adverse selected'; verdict.className = 'src-val red';
+    }
+  } else if (chip) {
+    chip.style.display = 'none';
+  }
 }
 
 function updateDiagnostics(d) {
@@ -1906,30 +1995,6 @@ function renderTrades() {
       timeStr = `${buyT} → ${sellT}${held}`;
     }
 
-    // Score flow: show raw→final if penalized, otherwise just final
-    const rawScore   = t.edge_score != null ? Math.round(t.edge_score) : null;
-    const sprPenalty = t.spread_penalty || 0;
-    const rawPre     = sprPenalty ? Math.round(rawScore - sprPenalty) : rawScore;
-    let scoreHtml = '';
-    if (rawScore != null) {
-      if (sprPenalty) {
-        const finalCls = rawScore >= 80 ? 'good' : rawScore >= 65 ? '' : 'dim';
-        scoreHtml = `<div class="score-flow"><span class="score-raw">${rawPre}</span><span class="score-arrow">→</span><span class="score-final ${finalCls}">${rawScore}</span></div>`;
-      } else {
-        const cls = rawScore >= 80 ? 'clean good' : 'clean';
-        scoreHtml = `<div class="score-flow"><span class="score-final ${cls}">${rawScore}</span></div>`;
-      }
-    }
-
-    // Spread ratio badge
-    const ratio = t.spread_sl_ratio;
-    let sprHtml = '';
-    if (ratio != null && ratio > 0) {
-      const sprCls = ratio < 30 ? 'spr-clean' : ratio < 60 ? 'spr-mild' : ratio < 90 ? 'spr-strong' : 'spr-danger';
-      const pen    = sprPenalty ? ` −${Math.abs(sprPenalty)}` : '';
-      sprHtml = `<span class="spr-badge ${sprCls}">SPR ${ratio.toFixed(0)}%${pen}</span>`;
-    }
-
     const row = document.createElement('div');
     row.className = `clip-row ${rowCls}`;
     row.innerHTML = `
@@ -1944,9 +2009,8 @@ function renderTrades() {
       <div class="clip-cell">${pnlHtml}</div>
       <div class="clip-cell">${pctHtml}</div>
       <div class="clip-cell" style="display:flex;flex-direction:column;gap:2px;overflow:visible;white-space:normal">
-        <span class="reason-badge ${reason}">${reason.replace(/_/g,' ').toUpperCase()}</span>
+        <span class="reason-badge ${reason}">${reason.replace('_',' ').toUpperCase()}</span>
         <span style="font-family:var(--mono);font-size:9px;color:#8899aa;line-height:1.3">${timeStr}</span>
-        ${scoreHtml}${sprHtml}
       </div>
     `;
     wrap.appendChild(row);
@@ -2021,91 +2085,6 @@ function attachFaderEditors() {
     const el = document.getElementById(id);
     if (el) el.onclick = () => makeFaderEditable(id);
   });
-}
-
-// ─── Insights: side bias + exit attribution + spread impact ──────────────────
-function updateInsights(d) {
-  const sa = d.spread_attribution || {};
-
-  // Spread impact
-  const sprBlocked = document.getElementById('spr-blocked');
-  const sprDown    = document.getElementById('spr-downgraded');
-  if (sprBlocked) sprBlocked.textContent = sa.blocked_today    != null ? sa.blocked_today    : '—';
-  if (sprDown)    sprDown.textContent    = sa.downgraded_entered != null ? sa.downgraded_entered : '—';
-
-  // Side bias — computed from trade history
-  const yesBuys = allTrades.filter(t => t.event === 'buy'  && t.side === 'yes').length;
-  const noBuys  = allTrades.filter(t => t.event === 'buy'  && t.side === 'no').length;
-  const yesSells= allTrades.filter(t => t.event === 'sell' && t.side === 'yes');
-  const noSells = allTrades.filter(t => t.event === 'sell' && t.side === 'no');
-  const yesWins = yesSells.filter(t => t.pnl > 0).length;
-  const noWins  = noSells.filter(t => t.pnl > 0).length;
-  const yesPnl  = yesSells.reduce((s,t) => s + (t.pnl||0), 0);
-  const noPnl   = noSells.reduce((s,t)  => s + (t.pnl||0), 0);
-
-  function biasStr(entries, wins, total, pnl) {
-    if (!entries) return '—';
-    const wr  = total > 0 ? Math.round(wins/total*100)+'%' : '—';
-    const pnlStr = pnl >= 0 ? '+$'+pnl.toFixed(2) : '−$'+Math.abs(pnl).toFixed(2);
-    return `${entries} entries · ${wr} wr · ${pnlStr}`;
-  }
-
-  const yesStat = document.getElementById('bias-yes-stat');
-  const noStat  = document.getElementById('bias-no-stat');
-  if (yesStat) yesStat.textContent = biasStr(yesBuys, yesWins, yesSells.length, yesPnl);
-  if (noStat)  noStat.textContent  = biasStr(noBuys,  noWins,  noSells.length,  noPnl);
-
-  // Exit attribution
-  const exitEl = document.getElementById('exit-attr-rows');
-  if (!exitEl) return;
-  const sells = allTrades.filter(t => t.event === 'sell');
-  if (!sells.length) { exitEl.innerHTML = '<div class="exit-attr-row"><span class="exit-attr-key">No closed trades yet</span></div>'; return; }
-
-  // Group by reason
-  const byReason = {};
-  sells.forEach(t => {
-    const r = t.reason || 'other';
-    if (!byReason[r]) byReason[r] = { count: 0, pnl: 0, holdMins: [] };
-    byReason[r].count++;
-    byReason[r].pnl += (t.pnl || 0);
-    if (t.entry_time && t.exit_time) {
-      const mins = Math.round((new Date(t.exit_time) - new Date(t.entry_time)) / 60000);
-      byReason[r].holdMins.push(mins);
-    }
-  });
-
-  const ORDER = ['take_profit','trailing_stop','stop_loss','dead_market_expire','manual_exit','other'];
-  const LABELS = { take_profit:'Take Profit', trailing_stop:'Trailing Stop', stop_loss:'Stop Loss',
-                   dead_market_expire:'Dead Market', manual_exit:'Manual', other:'Other' };
-  const COLORS = { take_profit:'tp', stop_loss:'sl', trailing_stop:'sl' };
-
-  let html = '';
-  ORDER.forEach(r => {
-    const g = byReason[r];
-    if (!g) return;
-    const avg = g.holdMins.length ? Math.round(g.holdMins.reduce((a,b)=>a+b,0)/g.holdMins.length) : null;
-    const holdStr = avg != null ? (avg < 60 ? ` · ${avg}m avg` : ` · ${Math.floor(avg/60)}h${avg%60}m avg`) : '';
-    const pnlStr  = g.pnl >= 0 ? '+$'+g.pnl.toFixed(2) : '−$'+Math.abs(g.pnl).toFixed(2);
-    const cls     = COLORS[r] || '';
-    html += `<div class="exit-attr-row">
-      <span class="exit-attr-key">${LABELS[r]||r}${holdStr}</span>
-      <span class="exit-attr-val ${cls}">${g.count}× · ${pnlStr}</span>
-    </div>`;
-  });
-  exitEl.innerHTML = html;
-}
-
-// ─── Live rules snapshot ───────────────────────────────────────────────────────
-function updateRulesSnapshot(d) {
-  const s = d.settings || {};
-  function set(id, val, cls) {
-    const el = document.getElementById(id);
-    if (el) { el.textContent = val; if (cls) el.className = 'rules-val ' + cls; }
-  }
-  set('rule-edge',  s.min_edge_score  != null ? s.min_edge_score  : '—', 'amber');
-  set('rule-sl',    s.stop_loss_pct   != null ? s.stop_loss_pct+'%' : '—', 'red');
-  set('rule-spend', s.max_spend       != null ? '$'+parseFloat(s.max_spend).toFixed(2) : '—', '');
-  set('rule-cap',   s.daily_loss_cap  != null ? '$'+parseFloat(s.daily_loss_cap).toFixed(2) : '—', 'red');
 }
 
 // ─── Chat panel ───────────────────────────────────────────────────────────────

@@ -36,6 +36,8 @@ import polymarket
 import predictit
 import fedwatch
 import noaa
+import ndfd
+import econ_signals
 
 # ── Shared state — written by bg thread, read by scan ────────────────────────
 _lock       = threading.Lock()
@@ -148,10 +150,12 @@ def start_background_fetcher():
     threading.Thread(target=_pm_loop, daemon=True, name="cross-pm-bg").start()
     threading.Thread(target=_pi_loop, daemon=True, name="cross-pi-bg").start()
     fedwatch.get_meetings()    # warm FedWatch cache immediately
-    noaa.start()               # starts NOAA background thread
+    noaa.start()               # starts NOAA background thread (12h periods)
+    ndfd.start()               # starts NDFD background thread (hourly)
+    econ_signals.start()       # starts BLS/FRED/GDPNow background thread (4h)
     threading.Thread(target=_fetch_polymarket, daemon=True).start()
     threading.Thread(target=_fetch_predictit,  daemon=True).start()
-    print("  [Cross] Background prefetch started — Polymarket(90s) / PredictIt(5m) / FedWatch(1h) / NOAA(1h)")
+    print("  [Cross] Background prefetch started — Polymarket(90s) / PredictIt(5m) / FedWatch(1h) / NOAA(1h) / NDFD-hourly(1h) / EconSignals(4h)")
 
 
 # ── Core edge computation ─────────────────────────────────────────────────────
@@ -181,10 +185,19 @@ def compute_cross_edge(kalshi_market, pm_markets, pi_markets):
         # FedWatch
         "fed_prob":    None,
         "fed_meeting": None,
-        # NOAA
+        # NOAA/NWS
         "noaa_prob":   None,
         "noaa_city":   None,
         "noaa_detail": None,
+        # NDFD hourly
+        "ndfd_prob":   None,
+        "ndfd_city":   None,
+        "ndfd_detail": None,
+        "ndfd_fields": None,
+        # Econ signals
+        "econ_prob":   None,
+        "econ_series": None,
+        "econ_detail": None,
     }
 
     external_probs = []
@@ -219,7 +232,7 @@ def compute_cross_edge(kalshi_market, pm_markets, pi_markets):
         result["gaps"].append(("CME FedWatch", gap))
         external_probs.append(fed_p)
 
-    # ── 4. NOAA/NWS ──────────────────────────────────────────────────────────
+    # ── 4. NOAA/NWS (12-hour periods) ────────────────────────────────────────
     wx = noaa.match_market(title)
     if wx and wx.get("prob") is not None:
         wx_p = wx["prob"]
@@ -232,6 +245,56 @@ def compute_cross_edge(kalshi_market, pm_markets, pi_markets):
         result["sources"].append("NOAA/NWS")
         result["gaps"].append(("NOAA/NWS", gap))
         external_probs.append(wx_p)
+
+    # ── 5. NDFD hourly — higher precision than NWS periods ───────────────────
+    # Only used for weather markets. If both NOAA and NDFD agree, confidence ↑.
+    # If they disagree by >10%, prefer NDFD (more granular).
+    nd = ndfd.match_market(title)
+    if nd and nd.get("prob") is not None:
+        nd_p = nd["prob"]
+        gap  = nd_p - kalshi_p
+        result.update(
+            ndfd_prob=round(nd_p, 4),
+            ndfd_city=nd.get("city"),
+            ndfd_detail=nd.get("detail"),
+            ndfd_fields=nd.get("fields"),
+        )
+        # If NOAA is already a source and they broadly agree (within 15%), merge
+        # rather than double-count — take NDFD as the authoritative value.
+        if "NOAA/NWS" in result["sources"] and result.get("noaa_prob") is not None:
+            noaa_p = result["noaa_prob"]
+            if abs(nd_p - noaa_p) <= 0.15:
+                # Replace NOAA entry with NDFD (better precision, same signal)
+                idx = result["sources"].index("NOAA/NWS")
+                result["sources"][idx] = "NDFD"
+                for i, (src, g) in enumerate(result["gaps"]):
+                    if src == "NOAA/NWS":
+                        result["gaps"][i] = ("NDFD", gap)
+                external_probs[external_probs.index(noaa_p)] = nd_p
+                result["noaa_prob"] = None   # superseded
+            else:
+                # They disagree — add as independent source, let consensus logic handle it
+                result["sources"].append("NDFD")
+                result["gaps"].append(("NDFD", gap))
+                external_probs.append(nd_p)
+        else:
+            result["sources"].append("NDFD")
+            result["gaps"].append(("NDFD", gap))
+            external_probs.append(nd_p)
+
+    # ── 6. Econ Signals (BLS/FRED/GDPNow) ───────────────────────────────────
+    ec = econ_signals.match_market(kalshi_market)
+    if ec and ec.get("prob") is not None:
+        ec_p = ec["prob"]
+        gap  = ec_p - kalshi_p
+        result.update(
+            econ_prob=round(ec_p, 4),
+            econ_series=ec.get("series"),
+            econ_detail=ec.get("detail"),
+        )
+        result["sources"].append("EconSignals")
+        result["gaps"].append(("EconSignals", gap))
+        external_probs.append(ec_p)
 
     if not external_probs:
         return result

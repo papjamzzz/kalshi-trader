@@ -110,6 +110,10 @@ class TradingEngine:
         # so the daily loss cap survives restarts
         self._daily_pnl, self._wins, self._losses = self._rebuild_daily_pnl()
 
+        # Markout tracker — measures adverse selection quality of entries
+        # Each completed trade stores midpoint changes at +5s, +15s, +60s
+        self._markout_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="markout")
+
     # ── Persistence ───────────────────────────────────────────────────────────
 
     def _load_settings(self):
@@ -233,6 +237,8 @@ class TradingEngine:
             print("  🔄 Daily P&L reset")
 
     def _daily_limit_hit(self):
+        if PAPER_TRADING:
+            return False   # No daily cap in paper mode — trade freely
         cap = self.settings.get("daily_loss_cap", 50.0)
         return self._daily_pnl <= -cap
 
@@ -309,29 +315,173 @@ class TradingEngine:
         print(f"  ⚽ {len(all_markets)} sports markets fetched (parallel)")
         return all_markets
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # TARGET SERIES — direct Kalshi fetches for high-signal short-term markets
+    # These are the event series that actually resolve in days/hours, not years.
+    # ─────────────────────────────────────────────────────────────────────────
+    TARGET_EVENT_PREFIXES = (
+        # Weather — daily city temperature & rain, resolves same day / next day
+        "KXHIGHNY", "KXHIGHCHI", "KXHIGHMIA", "KXHIGHLAX", "KXHIGHTDAL",
+        "KXHIGHTHOU", "KXHIGHTBOS", "KXHIGHTDC", "KXHIGHTPHX", "KXHIGHTSFO",
+        "KXHIGHTMIN", "KXHIGHTLV", "KXHIGHTAUS", "KXHIGHTDEN", "KXHIGHTSEA",
+        "KXHIGHTATL", "KXHIGHTSATX", "KXHIGHTOKC", "KXHIGHTNOLA", "KXHIGHPHIL",
+        "KXLOWTNYC", "KXLOWTCHI", "KXLOWTMIA", "KXLOWTLAX", "KXLOWTDAL",
+        "KXLOWTHOU", "KXLOWTBOS", "KXLOWTDC", "KXLOWTPHX", "KXLOWTSFO",
+        "KXLOWTMIN", "KXLOWTLV", "KXLOWTAUS", "KXLOWTDEN", "KXLOWTSEA",
+        "KXLOWTATL", "KXLOWTSATX", "KXLOWTOKC", "KXLOWTNOLA", "KXLOWTPHIL",
+        "KXRAINNYC", "KXRAINCHIM", "KXRAINDALM", "KXRAINAUSM", "KXRAINHOUM",
+        "KXRAINLAXM", "KXRAINMIAM", "KXRAINSEAM", "KXRAINSFOM", "KXRAINDENM",
+        # Econ — monthly reports, resolves on announcement day
+        "KXCPI", "KXCPIYOY", "KXCPICORE", "KXCPICOREYOY",
+        "KXECONSTATCPI", "KXECONSTATCPIYOY", "KXECONSTATCPICORE", "KXECONSTATCPICOREYOY",
+        "KXECONSTATCORECPIYOY",
+        "KXU3", "KXECONSTATU3",
+        "KXPCECORE",
+        "KXGDP",
+        "KXFEDDECISION", "KXFED-",
+        # Crypto — daily price range, resolves at 5pm ET same day
+        "KXBTC-", "KXBTCD-", "KXBTCE-",
+        "KXETH-", "KXETHD-", "KXETHE-",
+        "KXSOL-", "KXSOLD-", "KXSOLE-",
+        "KXDOGE-", "KXDOGED-",
+        "KXXRP-", "KXXRPD-",
+    )
+
+    def _fetch_target_markets(self):
+        """
+        Directly fetch short-term weather/econ/crypto markets from Kalshi events API.
+        These are the only markets that actually resolve in hours/days — not years.
+        Returns a list of market dicts in the same format as KK's feed.
+        """
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+        markets = []
+        seen = set()
+
+        # Fetch all open events, page through until we have enough
+        cursor = None
+        all_events = []
+        for _ in range(15):   # max 15 pages = 3000 events
+            params = {"limit": 200, "status": "open"}
+            if cursor:
+                params["cursor"] = cursor
+            try:
+                data = kapi._get("/events", params=params)
+            except Exception as e:
+                print(f"  ⚠ events fetch error: {e}")
+                break
+            events = data.get("events", [])
+            if not events:
+                break
+            all_events.extend(events)
+            cursor = data.get("cursor", "")
+            if not cursor:
+                break
+
+        # Filter to target event series only
+        target_events = []
+        for ev in all_events:
+            eticker = ev.get("event_ticker", "")
+            if any(eticker.startswith(p) for p in self.TARGET_EVENT_PREFIXES):
+                target_events.append(eticker)
+
+        print(f"  🎯 {len(target_events)} target events from {len(all_events)} total")
+
+        # Fetch markets for each target event in parallel
+        def fetch_event_markets(event_ticker):
+            results = []
+            try:
+                data = kapi._get("/markets", params={"event_ticker": event_ticker, "limit": 50, "status": "open"})
+                for m in data.get("markets", []):
+                    ticker = m.get("ticker", "")
+                    if not ticker or ticker in seen:
+                        continue
+                    # Only include markets closing within 72h — filters out year-long bets
+                    close_time = m.get("close_time") or m.get("expected_expiration_time", "")
+                    if close_time:
+                        try:
+                            exp = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+                            hours_left = (exp - now).total_seconds() / 3600
+                            if hours_left < 2 or hours_left > 96:
+                                continue
+                        except Exception:
+                            pass
+
+                    # Normalize to KK-style market dict
+                    yes_bid = int(m.get("yes_bid", 0))
+                    yes_ask = int(m.get("yes_ask", 0))
+                    volume  = int(m.get("volume", 0))
+                    if yes_bid == 0 and yes_ask == 0:
+                        continue
+
+                    results.append({
+                        "ticker":     ticker,
+                        "title":      m.get("title", ticker),
+                        "yes_bid":    yes_bid,
+                        "yes_ask":    yes_ask,
+                        "volume":     volume,
+                        "score":      72,   # baseline — will be gated by edge/signal filters
+                        "close_time": close_time,
+                        "_source":    "direct",
+                    })
+            except Exception:
+                pass
+            return results
+
+        with ThreadPoolExecutor(max_workers=12) as ex:
+            futures = {ex.submit(fetch_event_markets, et): et for et in target_events}
+            for fut in as_completed(futures):
+                batch = fut.result()
+                for m in batch:
+                    if m["ticker"] not in seen:
+                        seen.add(m["ticker"])
+                        markets.append(m)
+
+        print(f"  🌤 {len(markets)} direct target markets fetched")
+        return markets
+
     def _fetch_markets(self):
         """
-        KK feeds ALL market types — event markets (TV, elections, companies) are
-        profitable per historical data. Sports game markets are fine. Season futures
-        (KXNBA-26-*, etc.) are blocked in _should_enter.
+        Dual-source fetch:
+        1. Direct Kalshi events API for target series (weather/econ/crypto, <96h to close)
+        2. KK scored feed as supplementary — but filtered to <30 day horizon
+        Both sources are cross-market enriched before scanning.
         """
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+
+        # ── Source 1: Direct target series ───────────────────────────────────
+        direct_markets = self._fetch_target_markets()
+        direct_tickers = {m["ticker"] for m in direct_markets}
+
+        # ── Source 2: KK feed — filtered to <30 day horizon ──────────────────
         kk_markets = []
         try:
             r = requests.get(KK_API, timeout=8)
             if r.status_code == 200:
                 data = r.json()
                 raw = data if isinstance(data, list) else data.get("markets", [])
-                # Use ALL KK markets — season futures blocked in _should_enter
-                kk_markets = list(raw)
+                for m in raw:
+                    if m.get("ticker") in direct_tickers:
+                        continue  # already have it from direct fetch
+                    # Option B: time horizon filter — skip anything >30 days out
+                    close_time = m.get("close_time") or m.get("expected_expiration_time", "")
+                    if close_time:
+                        try:
+                            exp = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+                            days_left = (exp - now).total_seconds() / 86400
+                            if days_left > 30:
+                                continue
+                        except Exception:
+                            pass
+                    kk_markets.append(m)
                 if kk_markets:
-                    print(f"  📡 {len(kk_markets)} markets from KK")
+                    print(f"  📡 {len(kk_markets)} KK markets (≤30d horizon)")
         except Exception:
             pass
 
-        # Sports direct fetch disabled — all sports blocked in _should_enter.
-        # Scanning KK markets only: weather, fed/econ, crypto, politics, pop culture.
-        markets = kk_markets
-        print(f"  📊 {len(markets)} markets to scan (non-sports only)")
+        markets = direct_markets + kk_markets
+        print(f"  📊 {len(markets)} total markets to scan")
 
         if CROSS_MARKET_ENABLED:
             try:
@@ -548,6 +698,17 @@ class TradingEngine:
         if cross_signal not in ("YES", "NO"):
             return reject("conflicted_cross_signal")
 
+        # ── Category filter ──────────────────────────────────────────────
+        # Focus: weather > econ > crypto (secondary). Block: politics, other.
+        # Crypto allowed but requires a tighter spread (max 12¢) to avoid
+        # choppy late-entry around volatile price swings.
+        category = self._detect_category(ticker, m.get("title", ""))
+        m["_category"] = category   # stash so _enter_position can read it
+
+        BLOCKED_CATEGORIES = {"politics", "other", "pop_culture"}
+        if category in BLOCKED_CATEGORIES:
+            return reject(f"category_blocked_{category}")
+
         # Edge score check
         score = float(m.get("score", 0))
         if score < s.get("min_edge_score", 65):
@@ -555,9 +716,12 @@ class TradingEngine:
                 self._spread_blocked += 1   # spread penalty was the deciding factor
             return reject("edge_score_low")
 
-        # Volume check
+        # Volume check — crypto needs higher liquidity threshold to avoid thin markets
         volume = int(m.get("volume", 0))
-        if volume < s.get("min_volume", 500):
+        min_vol = s.get("min_volume", 500)
+        if category == "crypto":
+            min_vol = max(min_vol, 1000)
+        if volume < min_vol:
             return reject("low_volume")
 
         # Price data
@@ -574,7 +738,13 @@ class TradingEngine:
         # Spread quality score — gates hard rejects AND penalizes borderline markets
         # spread_ratio = spread / entry as a % of stop_loss → how much of the buffer is eaten on entry
         spread = yes_ask - yes_bid
-        max_spread = 18 if cross_signal else 25
+        # Crypto gets a tighter spread gate — choppier markets, late entries get burned fast
+        if category == "crypto":
+            max_spread = 10
+        elif cross_signal:
+            max_spread = 18
+        else:
+            max_spread = 25
         if spread > max_spread:
             return reject("spread_too_wide")
 
@@ -696,22 +866,70 @@ class TradingEngine:
         """Tag each market with a category for P&L tracking."""
         t  = ticker.upper()
         tl = title.lower()
-        if any(x in t for x in ("KXBTC", "KXETH", "KXCRYPTO", "KXSOL", "KXDOGE")):
-            return "crypto"
-        if any(x in t for x in ("KXFED", "KXECON", "KXCPI", "KXJOBS", "KXGDP", "KXRATE")):
-            return "econ"
-        if any(x in t for x in ("KXPOL", "KXELECT", "KXGOV", "KXCONGRESS", "KXPRES")):
-            return "politics"
-        if any(w in tl for w in ["snow", "rain", "temperature", "weather", "precip", "storm", "heat", "cold"]):
+
+        # ── Ticker-prefix detection (high confidence) ────────────────────────
+        # Weather — NOAA daily city temp/rain series (KXHIGH*, KXLOWT*, KXRAIN*)
+        WEATHER_PREFIXES = (
+            "KXHIGHNY", "KXHIGHCHI", "KXHIGHMIA", "KXHIGHLAX", "KXHIGHTDAL",
+            "KXHIGHTHOU", "KXHIGHTBOS", "KXHIGHTDC", "KXHIGHTPHX", "KXHIGHTSFO",
+            "KXHIGHTMIN", "KXHIGHTLV", "KXHIGHTAUS", "KXHIGHTDEN", "KXHIGHTSEA",
+            "KXHIGHTATL", "KXHIGHTSATX", "KXHIGHTOKC", "KXHIGHTNOLA", "KXHIGHPHIL",
+            "KXLOWTNYC", "KXLOWTCHI", "KXLOWTMIA", "KXLOWTLAX", "KXLOWTDAL",
+            "KXLOWTHOU", "KXLOWTBOS", "KXLOWTDC", "KXLOWTPHX", "KXLOWTSFO",
+            "KXLOWTMIN", "KXLOWTLV", "KXLOWTAUS", "KXLOWTDEN", "KXLOWTSEA",
+            "KXLOWTATL", "KXLOWTSATX", "KXLOWTOKC", "KXLOWTNOLA", "KXLOWTPHIL",
+            "KXRAINNYC", "KXRAINCHIM", "KXRAINDALM", "KXRAINAUSM", "KXRAINHOUM",
+            "KXRAINLAXM", "KXRAINMIAM", "KXRAINSEAM", "KXRAINSFOM", "KXRAINDENM",
+            "KXHMONTHRANGE", "KXTROPSTORM",
+        )
+        if any(t.startswith(p) for p in WEATHER_PREFIXES):
             return "weather"
-        if any(w in tl for w in ["oscar", "grammy", "emmy", "award", "box office", "chart", "album", "movie"]):
-            return "pop_culture"
-        if any(w in tl for w in ["federal reserve", "fomc", "interest rate", "inflation", "cpi", "gdp", "unemployment"]):
-            return "econ"
-        if any(w in tl for w in ["president", "congress", "senate", "election", "vote", "trump", "biden", "harris"]):
-            return "politics"
-        if any(w in tl for w in ["bitcoin", "ethereum", "crypto", "btc", "eth"]):
+
+        # Crypto — daily price range series
+        CRYPTO_PREFIXES = (
+            "KXBTC-", "KXBTCD-", "KXBTCE-",
+            "KXETH-", "KXETHD-", "KXETHE-",
+            "KXSOL-", "KXSOLD-", "KXSOLE-",
+            "KXDOGE-", "KXDOGED-",
+            "KXXRP-", "KXXRPD-",
+            "KXBTCMAX", "KXBTCMIN", "KXETHMAX", "KXETHMIN",
+            "KXSOLMAX", "KXSOLMIN", "KXDOGEMAX", "KXDOGEMIN", "KXXRPMAX", "KXXRPMIN",
+        )
+        if any(t.startswith(p) for p in CRYPTO_PREFIXES):
             return "crypto"
+
+        # Econ — CPI, jobs, Fed, GDP report series
+        ECON_PREFIXES = (
+            "KXCPI", "KXECONSTATCPI", "KXECONSTATCORECPI", "KXCPICOREYOY", "KXCPIYOY",
+            "KXU3", "KXECONSTATU3",
+            "KXPCECORE",
+            "KXGDP", "KXNGDPQ",
+            "KXFEDDECISION", "KXFEDCOMBO", "KXFOMCDISSENT",
+            "KXUE-", "KXARMOMINF", "KXJPMOMINF", "KXCACPIYOY", "KXUKCPIYOY",
+            "KXDEGDP", "KXESGDP", "KXEZGDP", "KXFRGDP", "KXITGDP",
+            "KXTARIFFRATE", "KXSHELTERCPI", "KXUSGASCPI", "KXUSEDCARCPI",
+            "KXAIRFARECPI", "KXTOBACCPI",
+        )
+        if any(t.startswith(p) for p in ECON_PREFIXES):
+            return "econ"
+
+        # ── Title-keyword fallback ────────────────────────────────────────────
+        if any(w in tl for w in ["highest temperature", "lowest temperature", "will it rain", "inches of rain",
+                                   "rainfall", "snowfall", "precipitation", "hurricane", "tornado", "wildfire"]):
+            return "weather"
+        if any(w in tl for w in ["bitcoin price", "ethereum price", "btc price", "eth price",
+                                   "solana price", "dogecoin price", "xrp price", "ripple price"]):
+            return "crypto"
+        if any(w in tl for w in ["cpi", "inflation rate", "unemployment rate", "fed funds rate",
+                                   "fomc", "interest rate", "gdp growth", "nonfarm payroll", "pce"]):
+            return "econ"
+        if any(x in t for x in ("KXPOL", "KXELECT", "KXGOV", "KXCONGRESS", "KXPRES", "KXSENATE", "KXSCOTUS")):
+            return "politics"
+        if any(w in tl for w in ["president", "congress", "senate", "election", "vote", "supreme court",
+                                   "legislation", "bill passes", "executive order"]):
+            return "politics"
+        if any(w in tl for w in ["oscar", "grammy", "emmy", "box office", "album", "chart", "music video"]):
+            return "pop_culture"
         return "other"
 
     # ── Dynamic position sizing ───────────────────────────────────────────────
@@ -753,7 +971,7 @@ class TradingEngine:
         cross_edge   = m.get("cross_edge") or {}
         side  = self._determine_side(yes_bid, yes_ask, cross_signal)
         score = float(m.get("score", 0))
-        category = self._detect_category(ticker, m.get("title", ""))
+        category = m.get("_category") or self._detect_category(ticker, m.get("title", ""))
 
         if side == "yes":
             entry_price = int(round(yes_ask))
@@ -789,11 +1007,14 @@ class TradingEngine:
             if spread_penalty:
                 self._spread_downgraded += 1
 
+            entry_mid = (yes_bid + yes_ask) / 2.0
+
             position = {
                 "ticker":          ticker,
                 "side":            side,
                 "count":           count,
                 "entry_price":     entry_price,
+                "entry_mid":       round(entry_mid, 2),
                 "entry_cost":      actual_cost,
                 "entry_time":      datetime.now().isoformat(),
                 "order_id":        order_id,
@@ -803,11 +1024,17 @@ class TradingEngine:
                 "size_mult":       mult,
                 "sources":         cross_edge.get("sources", []),
                 "peak_pnl_pct":    0.0,
+                "peak_favorable":  0.0,
+                "worst_adverse":   0.0,
+                "markout":         {},
                 "spread_penalty":  spread_penalty,
                 "spread_sl_ratio": spread_sl_ratio,
             }
             with self._lock:
                 self.positions[ticker] = position
+
+            # Spawn markout tracker — runs in background, polls at +5/15/60s
+            self._markout_executor.submit(self._track_markout, ticker, entry_mid, side)
 
             # FIX Bug 1: mark as entered this cycle so _monitor_positions
             # doesn't evaluate it for stop-loss before the market can reprice
@@ -841,6 +1068,47 @@ class TradingEngine:
             import traceback
             traceback.print_exc()
             self._status_msg = f"Order error: {str(e)[:60]}"
+
+    # ── Markout Tracker ───────────────────────────────────────────────────────
+
+    def _track_markout(self, ticker, entry_mid, side):
+        """
+        Background thread: records midpoint at +5s, +15s, +60s after entry.
+        Measures adverse selection — did the market move for us or against us
+        immediately after we entered?  Positive markout = market agreed with us.
+        """
+        checkpoints = [5, 15, 60]
+        prev = 0
+        for secs in checkpoints:
+            time.sleep(secs - prev)
+            prev = secs
+            try:
+                raw = kapi.get_market(ticker)
+                if not raw:
+                    continue
+                bid = raw.get("yes_bid", 0)
+                ask = raw.get("yes_ask", 0)
+                if not bid or not ask:
+                    continue
+                mid = (bid + ask) / 2.0
+                # Markout in cents from our perspective:
+                # YES position  — want mid to rise   (+mid_change = good)
+                # NO  position  — want mid to fall   (-mid_change = good)
+                if side == "yes":
+                    mo = mid - entry_mid
+                else:
+                    mo = entry_mid - mid
+                with self._lock:
+                    if ticker in self.positions:
+                        self.positions[ticker].setdefault("markout", {})[f"s{secs}"] = round(mo, 2)
+                        # Track peak favorable and worst adverse mid-moves
+                        pos = self.positions[ticker]
+                        if mo > pos.get("peak_favorable", 0.0):
+                            pos["peak_favorable"] = round(mo, 2)
+                        if mo < pos.get("worst_adverse", 0.0):
+                            pos["worst_adverse"] = round(mo, 2)
+            except Exception:
+                pass
 
     # ── Exit Logic ────────────────────────────────────────────────────────────
 
@@ -1023,6 +1291,11 @@ class TradingEngine:
             "spread_penalty":  pos.get("spread_penalty", 0),
             "spread_sl_ratio": pos.get("spread_sl_ratio", 0.0),
             "event":           "sell",
+            # Markout data — adverse selection analysis
+            "entry_mid":       pos.get("entry_mid", 0),
+            "markout":         pos.get("markout", {}),
+            "peak_favorable":  pos.get("peak_favorable", 0.0),
+            "worst_adverse":   pos.get("worst_adverse", 0.0),
         }
         self._record_trade(trade_record)
 
@@ -1163,6 +1436,9 @@ class TradingEngine:
             import noaa
             age_pm  = round((now - cross_market._pm_ts) / 60, 1) if cross_market._pm_ts else None
             age_pi  = round((now - cross_market._pi_ts) / 60, 1) if cross_market._pi_ts else None
+            import ndfd as ndfd_mod
+            import econ_signals as econ_mod
+            econ_status = econ_mod.status_summary()
             cm_freshness = {
                 "polymarket_age_min":  age_pm,
                 "polymarket_count":    len(cross_market._pm_markets),
@@ -1170,6 +1446,9 @@ class TradingEngine:
                 "predictit_count":     len(cross_market._pi_markets),
                 "fedwatch_meetings":   len(fedwatch._cache),
                 "noaa_cities":         len(noaa._forecasts),
+                "ndfd_cities":         len(ndfd_mod._hourly),
+                "econ_series":         econ_status.get("series_loaded", 0),
+                "econ_gdpnow":         econ_status.get("gdpnow"),
             }
         except Exception:
             pass
@@ -1240,6 +1519,24 @@ class TradingEngine:
             except Exception:
                 pass
 
+        # Markout summary — average midpoint drift at each checkpoint
+        closed_sells = [t for t in self.trades if t.get("event") == "sell" and t.get("markout")]
+        def _avg_markout(key):
+            vals = [t["markout"][key] for t in closed_sells if key in t.get("markout", {})]
+            return round(sum(vals) / len(vals), 2) if vals else None
+        def _avg_field(field):
+            vals = [float(t.get(field, 0)) for t in closed_sells if t.get(field) is not None]
+            return round(sum(vals) / len(vals), 2) if vals else None
+
+        markout_summary = {
+            "n":                 len(closed_sells),
+            "avg_5s":            _avg_markout("s5"),
+            "avg_15s":           _avg_markout("s15"),
+            "avg_60s":           _avg_markout("s60"),
+            "avg_peak_favorable": _avg_field("peak_favorable"),
+            "avg_worst_adverse":  _avg_field("worst_adverse"),
+        }
+
         return {
             "running":          self.running,
             "paper_trading":    PAPER_TRADING,
@@ -1258,11 +1555,12 @@ class TradingEngine:
             "last_entries":     self._last_entries_count,
             "cooldowns":        cooldowns,
             "cross_market":     cm_freshness,
-            "category_pnl":      cat_stats,
+            "category_pnl":     cat_stats,
             "spread_attribution": spread_attr,
             "dead_market_stats":  dead_stats,
             "clv":              clv_summary,
             "injury":           injury_status,
+            "markout":          markout_summary,
         }
 
     def get_trades(self):
