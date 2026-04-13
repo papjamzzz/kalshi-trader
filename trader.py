@@ -348,13 +348,16 @@ class TradingEngine:
             self._status_msg = f"Position limit reached ({current_pos_count})"
             return
 
-        # Check live balance before entering any positions
-        available = kapi.get_balance() / 100.0   # convert cents → dollars
+        # Balance check — paper mode uses virtual $1000, live checks real balance
         max_spend = s.get("max_spend", 2.50)
-        if available < max_spend:
-            self._status_msg = f"Low balance (${available:.2f}) — need ${max_spend:.2f} to trade"
-            print(f"  ⚠ Skipping entries — balance ${available:.2f} < max_spend ${max_spend:.2f}")
-            return
+        if PAPER_TRADING:
+            available = 1000.0   # virtual paper balance — no real funds needed
+        else:
+            available = kapi.get_balance() / 100.0
+            if available < max_spend:
+                self._status_msg = f"Low balance (${available:.2f}) — need ${max_spend:.2f} to trade"
+                print(f"  ⚠ Skipping entries — balance ${available:.2f} < max_spend ${max_spend:.2f}")
+                return
 
         # Track entries per event ticker to prevent over-concentration
         MAX_PER_EVENT = 2
