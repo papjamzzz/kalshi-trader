@@ -33,15 +33,19 @@ import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import polymarket
+import predictit
 import fedwatch
 import noaa
 
 # ── Shared state — written by bg thread, read by scan ────────────────────────
 _lock       = threading.Lock()
 _pm_markets = []    # Polymarket parsed market dicts
+_pi_markets = []    # PredictIt parsed contract dicts
 _pm_ts      = 0.0
+_pi_ts      = 0.0
 
 PM_REFRESH_INTERVAL  = 90      # Polymarket: 90s (free, no quota)
+PI_REFRESH_INTERVAL  = 300     # PredictIt: 5min (prices move)
 FED_REFRESH_INTERVAL = 3600    # FedWatch: 1h (FOMC probs don't move fast)
 NOAA_REFRESH_INTERVAL = 3600   # NOAA: 1h (NWS updates hourly)
 
@@ -113,6 +117,14 @@ def _fetch_polymarket():
     print(f"  [Cross/bg] Polymarket: {len(parsed)} markets")
 
 
+def _fetch_predictit():
+    global _pi_markets, _pi_ts
+    parsed = predictit.get_markets()
+    with _lock:
+        _pi_markets = parsed
+        _pi_ts      = time.time()
+
+
 def _pm_loop():
     while True:
         try:
@@ -122,21 +134,29 @@ def _pm_loop():
         time.sleep(PM_REFRESH_INTERVAL)
 
 
+def _pi_loop():
+    while True:
+        try:
+            _fetch_predictit()
+        except Exception as e:
+            print(f"  [Cross/pi] error: {e}")
+        time.sleep(PI_REFRESH_INTERVAL)
+
+
 def start_background_fetcher():
     """Start all background data threads. Call once at startup."""
-    # Polymarket loop
     threading.Thread(target=_pm_loop, daemon=True, name="cross-pm-bg").start()
-    # FedWatch + NOAA have their own internal refresh loops
+    threading.Thread(target=_pi_loop, daemon=True, name="cross-pi-bg").start()
     fedwatch.get_meetings()    # warm FedWatch cache immediately
     noaa.start()               # starts NOAA background thread
-    # Warm Polymarket immediately
     threading.Thread(target=_fetch_polymarket, daemon=True).start()
-    print("  [Cross] Background prefetch started — Polymarket(90s) / FedWatch(1h) / NOAA(1h)")
+    threading.Thread(target=_fetch_predictit,  daemon=True).start()
+    print("  [Cross] Background prefetch started — Polymarket(90s) / PredictIt(5m) / FedWatch(1h) / NOAA(1h)")
 
 
 # ── Core edge computation ─────────────────────────────────────────────────────
 
-def compute_cross_edge(kalshi_market, pm_markets):
+def compute_cross_edge(kalshi_market, pm_markets, pi_markets):
     """
     Compare Kalshi price against all external sources.
     Returns edge dict with bonus score and directional signal.
@@ -154,6 +174,10 @@ def compute_cross_edge(kalshi_market, pm_markets):
         "pm_match": None,
         "pm_prob":  None,
         "pm_sim":   0.0,
+        # PredictIt
+        "pi_match": None,
+        "pi_prob":  None,
+        "pi_sim":   0.0,
         # FedWatch
         "fed_prob":    None,
         "fed_meeting": None,
@@ -175,7 +199,17 @@ def compute_cross_edge(kalshi_market, pm_markets):
         result["gaps"].append(("Polymarket", gap))
         external_probs.append(pm_p)
 
-    # ── 2. CME FedWatch ──────────────────────────────────────────────────────
+    # ── 2. PredictIt ─────────────────────────────────────────────────────────
+    pi, pi_sim = _best_match(title, pi_markets, lambda m: m["question"])
+    if pi and pi.get("yes_prob") is not None:
+        pi_p = pi["yes_prob"]
+        gap  = pi_p - kalshi_p
+        result.update(pi_match=pi["question"], pi_prob=round(pi_p, 4), pi_sim=round(pi_sim, 3))
+        result["sources"].append("PredictIt")
+        result["gaps"].append(("PredictIt", gap))
+        external_probs.append(pi_p)
+
+    # ── 3. CME FedWatch ──────────────────────────────────────────────────────
     fed = fedwatch.match_market(title)
     if fed and fed.get("prob") is not None:
         fed_p = fed["prob"]
@@ -185,7 +219,7 @@ def compute_cross_edge(kalshi_market, pm_markets):
         result["gaps"].append(("CME FedWatch", gap))
         external_probs.append(fed_p)
 
-    # ── 3. NOAA/NWS ──────────────────────────────────────────────────────────
+    # ── 4. NOAA/NWS ──────────────────────────────────────────────────────────
     wx = noaa.match_market(title)
     if wx and wx.get("prob") is not None:
         wx_p = wx["prob"]
@@ -239,10 +273,11 @@ def enrich_markets(markets):
     """
     with _lock:
         pm = list(_pm_markets)
+        pi = list(_pi_markets)
 
     enriched = 0
     for m in markets:
-        ce = compute_cross_edge(m, pm)
+        ce = compute_cross_edge(m, pm, pi)
         m["cross_edge"] = ce
         if ce["bonus"] > 0:
             base = float(m.get("score", 0))

@@ -637,32 +637,92 @@ class TradingEngine:
             return "no"
         return None
 
+    # ── Category detection ────────────────────────────────────────────────────
+    @staticmethod
+    def _detect_category(ticker, title=""):
+        """Tag each market with a category for P&L tracking."""
+        t  = ticker.upper()
+        tl = title.lower()
+        if any(x in t for x in ("KXBTC", "KXETH", "KXCRYPTO", "KXSOL", "KXDOGE")):
+            return "crypto"
+        if any(x in t for x in ("KXFED", "KXECON", "KXCPI", "KXJOBS", "KXGDP", "KXRATE")):
+            return "econ"
+        if any(x in t for x in ("KXPOL", "KXELECT", "KXGOV", "KXCONGRESS", "KXPRES")):
+            return "politics"
+        if any(w in tl for w in ["snow", "rain", "temperature", "weather", "precip", "storm", "heat", "cold"]):
+            return "weather"
+        if any(w in tl for w in ["oscar", "grammy", "emmy", "award", "box office", "chart", "album", "movie"]):
+            return "pop_culture"
+        if any(w in tl for w in ["federal reserve", "fomc", "interest rate", "inflation", "cpi", "gdp", "unemployment"]):
+            return "econ"
+        if any(w in tl for w in ["president", "congress", "senate", "election", "vote", "trump", "biden", "harris"]):
+            return "politics"
+        if any(w in tl for w in ["bitcoin", "ethereum", "crypto", "btc", "eth"]):
+            return "crypto"
+        return "other"
+
+    # ── Dynamic position sizing ───────────────────────────────────────────────
+    @staticmethod
+    def _calc_position_size(base_spend, cross_edge):
+        """
+        Scale position size based on signal conviction.
+        More sources + bigger gap = bigger bet, up to 3x base.
+
+        Multiplier breakdown:
+          Sources: 1 → 1.0x | 2 → 1.5x | 3+ → 2.0x
+          Gap:     7-10% → +0.0 | 10-15% → +0.25 | 15-20% → +0.5 | 20%+ → +1.0
+          Cap: 3.0x max
+        """
+        gaps      = [abs(g) for _, g in (cross_edge.get("gaps") or [])]
+        n_sources = len(cross_edge.get("sources") or [])
+        avg_gap   = sum(gaps) / len(gaps) if gaps else 0
+
+        source_mult = 1.0 + max(0, n_sources - 1) * 0.5
+
+        if avg_gap >= 0.20:
+            gap_bonus = 1.0
+        elif avg_gap >= 0.15:
+            gap_bonus = 0.5
+        elif avg_gap >= 0.10:
+            gap_bonus = 0.25
+        else:
+            gap_bonus = 0.0
+
+        multiplier  = min(3.0, source_mult + gap_bonus)
+        sized_spend = round(base_spend * multiplier, 2)
+        return sized_spend, multiplier
+
     def _enter_position(self, m, s):
         ticker       = m.get("ticker", "")
         yes_bid      = m.get("yes_bid", 0)
         yes_ask      = m.get("yes_ask", 0)
         cross_signal = (m.get("cross_edge") or {}).get("signal")
-        # Pass cross_signal so direction uses the expanded 48/52¢ zone
+        cross_edge   = m.get("cross_edge") or {}
         side  = self._determine_side(yes_bid, yes_ask, cross_signal)
         score = float(m.get("score", 0))
+        category = self._detect_category(ticker, m.get("title", ""))
 
         if side == "yes":
-            entry_price = int(round(yes_ask))   # must be whole cents for Kalshi API
+            entry_price = int(round(yes_ask))
         else:
             entry_price = int(round(100 - yes_bid))
 
         if entry_price <= 0 or entry_price >= 100:
             return
 
-        max_spend = s.get("max_spend", 10.0)
-        count = kapi.contracts_for_spend(max_spend, entry_price)
+        # Dynamic position sizing — scales with conviction
+        base_spend          = s.get("max_spend", 10.0)
+        sized_spend, mult   = self._calc_position_size(base_spend, cross_edge)
+        count = kapi.contracts_for_spend(sized_spend, entry_price)
         if count <= 0:
             return
 
         actual_cost = (count * entry_price) / 100.0
+        sources_str = "+".join(cross_edge.get("sources", [])) or "none"
 
         mode_tag = "📋 PAPER" if PAPER_TRADING else "🟢 LIVE"
-        print(f"  {mode_tag} ENTERING: {ticker} | {side.upper()} | {count}x @ {entry_price}¢ | ${actual_cost:.2f} | score={score:.1f}")
+        print(f"  {mode_tag} ENTERING: {ticker} | {side.upper()} | {count}x @ {entry_price}¢ | "
+              f"${actual_cost:.2f} ({mult:.1f}x) | score={score:.1f} | cat={category} | src={sources_str}")
 
         try:
             if PAPER_TRADING:
@@ -681,7 +741,10 @@ class TradingEngine:
                 "order_id":      order_id,
                 "edge_score":    score,
                 "title":         m.get("title", ticker),
-                "peak_pnl_pct":  0.0,   # trailing stop tracker
+                "category":      category,
+                "size_mult":     mult,
+                "sources":       cross_edge.get("sources", []),
+                "peak_pnl_pct":  0.0,
             }
             with self._lock:
                 self.positions[ticker] = position
@@ -1029,16 +1092,32 @@ class TradingEngine:
             import fedwatch
             import noaa
             age_pm  = round((now - cross_market._pm_ts) / 60, 1) if cross_market._pm_ts else None
-            fed_meetings = len(fedwatch._cache)
-            noaa_cities  = len(noaa._forecasts)
+            age_pi  = round((now - cross_market._pi_ts) / 60, 1) if cross_market._pi_ts else None
             cm_freshness = {
-                "polymarket_age_min": age_pm,
-                "polymarket_count":   len(cross_market._pm_markets),
-                "fedwatch_meetings":  fed_meetings,
-                "noaa_cities":        noaa_cities,
+                "polymarket_age_min":  age_pm,
+                "polymarket_count":    len(cross_market._pm_markets),
+                "predictit_age_min":   age_pi,
+                "predictit_count":     len(cross_market._pi_markets),
+                "fedwatch_meetings":   len(fedwatch._cache),
+                "noaa_cities":         len(noaa._forecasts),
             }
         except Exception:
             pass
+
+        # Category P&L breakdown — win rate per market type
+        cat_stats = {}
+        for t in self.trades:
+            if t.get("event") != "sell":
+                continue
+            cat = t.get("category", "other")
+            pnl = float(t.get("pnl", 0))
+            if cat not in cat_stats:
+                cat_stats[cat] = {"wins": 0, "losses": 0, "pnl": 0.0}
+            cat_stats[cat]["pnl"] = round(cat_stats[cat]["pnl"] + pnl, 4)
+            if pnl >= 0:
+                cat_stats[cat]["wins"] += 1
+            else:
+                cat_stats[cat]["losses"] += 1
 
         # CLV summary — the strategy health indicator
         clv_summary = {}
@@ -1074,6 +1153,7 @@ class TradingEngine:
             "last_entries":     self._last_entries_count,
             "cooldowns":        cooldowns,
             "cross_market":     cm_freshness,
+            "category_pnl":     cat_stats,
             "clv":              clv_summary,
             "injury":           injury_status,
         }
