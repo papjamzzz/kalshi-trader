@@ -861,8 +861,9 @@ class TradingEngine:
                 # Market not found — likely expired/closed. In paper mode, force-exit at entry.
                 if PAPER_TRADING:
                     entry_p = pos["entry_price"]
-                    print(f"  🗑 {ticker}: market gone, paper-closing at entry ({entry_p}¢)")
-                    self._exit_position(ticker, pos, entry_p, "expired")
+                    cat = pos.get("category", "other")
+                    print(f"  🗑 dead_market_expire: {ticker} [{cat}] — market gone, closing at entry ({entry_p}¢)")
+                    self._exit_position(ticker, pos, entry_p, "dead_market_expire")
                 continue
 
             yes_bid = current_market.get("yes_bid", 0)
@@ -991,6 +992,7 @@ class TradingEngine:
             "pnl_pct":     round(pnl_pct, 2),
             "reason":      reason,
             "edge_score":  pos.get("edge_score", 0),
+            "category":    pos.get("category", "other"),
             "event":       "sell",
         }
         self._record_trade(trade_record)
@@ -1158,6 +1160,17 @@ class TradingEngine:
             else:
                 cat_stats[cat]["losses"] += 1
 
+        # Dead-market expiry stats — tracks how often the bot held a market
+        # that silently vanished (API returns None). Bucketed by category so we
+        # can spot which market types go dark most often and tune data sources.
+        dead_stats = {"total": 0, "by_category": {}}
+        for t in self.trades:
+            if t.get("reason") != "dead_market_expire":
+                continue
+            dead_stats["total"] += 1
+            cat = t.get("category", "other")
+            dead_stats["by_category"][cat] = dead_stats["by_category"].get(cat, 0) + 1
+
         # CLV summary — the strategy health indicator
         clv_summary = {}
         if CLV_ENABLED:
@@ -1193,6 +1206,7 @@ class TradingEngine:
             "cooldowns":        cooldowns,
             "cross_market":     cm_freshness,
             "category_pnl":     cat_stats,
+            "dead_market_stats": dead_stats,
             "clv":              clv_summary,
             "injury":           injury_status,
         }
