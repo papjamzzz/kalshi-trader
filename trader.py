@@ -102,6 +102,10 @@ class TradingEngine:
         self._last_skip_reasons = {}   # e.g. {"no_cross_signal": 12, "price_floor": 3}
         self._last_entries_count = 0
 
+        # Spread penalty attribution — session-level counters reset at daily rollover
+        self._spread_blocked    = 0   # markets where spread penalty caused edge_score_low
+        self._spread_downgraded = 0   # markets entered despite a spread penalty
+
         # FIX Bug 7: rebuild daily P&L/wins/losses from trades.json on every startup
         # so the daily loss cap survives restarts
         self._daily_pnl, self._wins, self._losses = self._rebuild_daily_pnl()
@@ -224,6 +228,8 @@ class TradingEngine:
             self._daily_pnl = 0.0
             self._wins = 0
             self._losses = 0
+            self._spread_blocked    = 0
+            self._spread_downgraded = 0
             print("  🔄 Daily P&L reset")
 
     def _daily_limit_hit(self):
@@ -545,6 +551,8 @@ class TradingEngine:
         # Edge score check
         score = float(m.get("score", 0))
         if score < s.get("min_edge_score", 65):
+            if m.get("spread_penalty"):
+                self._spread_blocked += 1   # spread penalty was the deciding factor
             return reject("edge_score_low")
 
         # Volume check
@@ -598,7 +606,10 @@ class TradingEngine:
 
         if spread_penalty:
             m["score"] = float(m.get("score", 0)) + spread_penalty
-            m["spread_penalty"] = spread_penalty
+            m["spread_penalty"]   = spread_penalty
+            m["spread_sl_ratio"]  = round(spread_sl_ratio, 1)
+        else:
+            m["spread_sl_ratio"]  = round(spread_sl_ratio, 1)  # always store for winners/losers stat
 
         # Time to expiry
         close_time = m.get("close_time") or m.get("expected_expiration_time")
@@ -642,6 +653,8 @@ class TradingEngine:
         # Re-check edge score after injury boost
         score = float(m.get("score", 0))
         if score < s.get("min_edge_score", 65):
+            if m.get("spread_penalty"):
+                self._spread_blocked += 1
             return reject("edge_score_low_post_injury")
 
         # ── 5i Final Gate ─────────────────────────────────────────────────────
@@ -771,20 +784,27 @@ class TradingEngine:
                 order = kapi.place_order(ticker, side, count, entry_price, action="buy")
                 order_id = order.get("order_id") or order.get("id", f"sim-{uuid.uuid4().hex[:8]}")
 
+            spread_penalty   = m.get("spread_penalty", 0)
+            spread_sl_ratio  = m.get("spread_sl_ratio", 0.0)
+            if spread_penalty:
+                self._spread_downgraded += 1
+
             position = {
-                "ticker":        ticker,
-                "side":          side,
-                "count":         count,
-                "entry_price":   entry_price,
-                "entry_cost":    actual_cost,
-                "entry_time":    datetime.now().isoformat(),
-                "order_id":      order_id,
-                "edge_score":    score,
-                "title":         m.get("title", ticker),
-                "category":      category,
-                "size_mult":     mult,
-                "sources":       cross_edge.get("sources", []),
-                "peak_pnl_pct":  0.0,
+                "ticker":          ticker,
+                "side":            side,
+                "count":           count,
+                "entry_price":     entry_price,
+                "entry_cost":      actual_cost,
+                "entry_time":      datetime.now().isoformat(),
+                "order_id":        order_id,
+                "edge_score":      score,
+                "title":           m.get("title", ticker),
+                "category":        category,
+                "size_mult":       mult,
+                "sources":         cross_edge.get("sources", []),
+                "peak_pnl_pct":    0.0,
+                "spread_penalty":  spread_penalty,
+                "spread_sl_ratio": spread_sl_ratio,
             }
             with self._lock:
                 self.positions[ticker] = position
@@ -988,19 +1008,21 @@ class TradingEngine:
             self.positions.pop(ticker, None)
 
         trade_record = {
-            "ticker":      ticker,
-            "side":        side,
-            "count":       count,
-            "entry_price": entry,
-            "exit_price":  exit_price,
-            "entry_time":  pos["entry_time"],
-            "exit_time":   datetime.now().isoformat(),
-            "pnl":         round(pnl_dollars, 4),
-            "pnl_pct":     round(pnl_pct, 2),
-            "reason":      reason,
-            "edge_score":  pos.get("edge_score", 0),
-            "category":    pos.get("category", "other"),
-            "event":       "sell",
+            "ticker":          ticker,
+            "side":            side,
+            "count":           count,
+            "entry_price":     entry,
+            "exit_price":      exit_price,
+            "entry_time":      pos["entry_time"],
+            "exit_time":       datetime.now().isoformat(),
+            "pnl":             round(pnl_dollars, 4),
+            "pnl_pct":         round(pnl_pct, 2),
+            "reason":          reason,
+            "edge_score":      pos.get("edge_score", 0),
+            "category":        pos.get("category", "other"),
+            "spread_penalty":  pos.get("spread_penalty", 0),
+            "spread_sl_ratio": pos.get("spread_sl_ratio", 0.0),
+            "event":           "sell",
         }
         self._record_trade(trade_record)
 
@@ -1167,6 +1189,30 @@ class TradingEngine:
             else:
                 cat_stats[cat]["losses"] += 1
 
+        # Spread penalty attribution — did spread quality correlate with outcome?
+        spread_attr = {
+            "blocked_today":     self._spread_blocked,
+            "downgraded_entered": self._spread_downgraded,
+            "avg_ratio_winners":  None,
+            "avg_ratio_losers":   None,
+        }
+        winner_ratios = [
+            float(t.get("spread_sl_ratio", 0))
+            for t in self.trades
+            if t.get("event") == "sell" and float(t.get("pnl", 0)) >= 0
+            and t.get("spread_sl_ratio") is not None
+        ]
+        loser_ratios = [
+            float(t.get("spread_sl_ratio", 0))
+            for t in self.trades
+            if t.get("event") == "sell" and float(t.get("pnl", 0)) < 0
+            and t.get("spread_sl_ratio") is not None
+        ]
+        if winner_ratios:
+            spread_attr["avg_ratio_winners"] = round(sum(winner_ratios) / len(winner_ratios), 1)
+        if loser_ratios:
+            spread_attr["avg_ratio_losers"] = round(sum(loser_ratios) / len(loser_ratios), 1)
+
         # Dead-market expiry stats — tracks how often the bot held a market
         # that silently vanished (API returns None). Bucketed by category so we
         # can spot which market types go dark most often and tune data sources.
@@ -1212,8 +1258,9 @@ class TradingEngine:
             "last_entries":     self._last_entries_count,
             "cooldowns":        cooldowns,
             "cross_market":     cm_freshness,
-            "category_pnl":     cat_stats,
-            "dead_market_stats": dead_stats,
+            "category_pnl":      cat_stats,
+            "spread_attribution": spread_attr,
+            "dead_market_stats":  dead_stats,
             "clv":              clv_summary,
             "injury":           injury_status,
         }
