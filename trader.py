@@ -401,7 +401,7 @@ class TradingEngine:
     )
 
     STOP_COOLDOWN_HOURS = 24
-    _5I_MIN_AGREE      = 5     # require ALL 5 models — maximum conviction only
+    _5I_MIN_AGREE      = 4     # require 4/5 models — filters flukey outliers
 
     def _is_sports_game(self, ticker):
         """True for game-level sports markets (KXNBAGAME-*, etc.) — NOT season futures."""
