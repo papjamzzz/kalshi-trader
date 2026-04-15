@@ -30,13 +30,6 @@ except Exception as e:
     print(f"  ⚠ Cross-market disabled: {e}")
     CROSS_MARKET_ENABLED = False
 
-try:
-    import injury as injury_scanner
-    injury_scanner.start()
-    INJURY_ENABLED = True
-except Exception as e:
-    print(f"  ⚠ Injury scanner disabled: {e}")
-    INJURY_ENABLED = False
 
 try:
     import clv as clv_tracker
@@ -113,6 +106,10 @@ class TradingEngine:
         # Markout tracker — measures adverse selection quality of entries
         # Each completed trade stores midpoint changes at +5s, +15s, +60s
         self._markout_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="markout")
+
+        # Markout circuit breaker — if last 3 trades all show negative +15s markout,
+        # pause new entries for 1 hour. Clears automatically when pause expires.
+        self._markout_pause_until = 0.0   # epoch seconds; 0 = not paused
 
         # Shared market price cache — written by scan loop, read by monitor loop
         self._latest_markets   = {}
@@ -269,82 +266,14 @@ class TradingEngine:
         return self._daily_pnl <= -cap
 
     def _get_scan_interval(self):
-        """
-        Dynamic scan interval based on injury windows and fresh signals.
-        Normal: 120s. Injury window: 15s. Fresh OUT/Doubtful: 8s.
-        This clusters contract entries around the windows that matter.
-        """
-        base = self.settings.get("scan_interval", 120)
-        if not INJURY_ENABLED:
-            return base
-        interval = injury_scanner.recommended_scan_interval(base)
-        if interval < base:
-            window = injury_scanner.active_window_name()
-            fresh  = injury_scanner.has_fresh_signal(20)
-            tag = "fresh injury" if fresh else f"window:{window}"
-            print(f"  ⚡ Fast scan ({interval}s) — {tag}")
-        return interval
+        return self.settings.get("scan_interval", 120)
 
     # ── Market Fetching ───────────────────────────────────────────────────────
 
-    # Game-level series to fetch — moneylines, spreads, totals
-    # Excludes season-long futures (KXNBA, KXMLB, KXNHL without GAME/SPREAD/TOTAL)
-    SPORTS_SERIES = [
-        "KXNBAGAME", "KXMLBGAME", "KXNHLGAME",
-        "KXNBASPREAD", "KXMLBSPREAD", "KXNHLSPREAD",
-        "KXNBATOTAL", "KXMLBTOTAL", "KXNHLTOTAL",
-    ]
-
-    def _fetch_one_series(self, series):
-        """Fetch a single sports series from Kalshi. Called in parallel."""
-        try:
-            data = kapi._get("/markets", params={
-                "limit": 100,
-                "status": "open",
-                "series_ticker": series,
-            })
-            raw = data.get("markets", [])
-            results = []
-            for m in raw:
-                ya  = round(float(m.get("yes_ask_dollars") or 0) * 100)
-                yb  = round(float(m.get("yes_bid_dollars") or 0) * 100)
-                vol = round(float(m.get("volume_fp") or 0))
-                if ya == 0 and yb == 0:
-                    continue
-                results.append({
-                    "ticker":       m.get("ticker", ""),
-                    "event_ticker": m.get("event_ticker", ""),
-                    "title":        m.get("title", ""),
-                    "yes_ask":      ya,
-                    "yes_bid":      yb,
-                    "volume":       vol,
-                    "score":        70,
-                    "close_time":   m.get("close_time") or m.get("expected_expiration_time"),
-                    "category":     "Sports",
-                })
-            return results
-        except Exception as e:
-            print(f"  ⚠ Sports fetch error ({series}): {e}")
-            return []
-
-    def _fetch_sports_direct(self):
-        """
-        Fetch all sports series in PARALLEL via ThreadPoolExecutor.
-        Serial fetching of 9 series × ~1s each = up to 9s blocking the scan loop.
-        Parallel fetching completes in ~1s regardless of series count.
-        """
-        all_markets = []
-        with ThreadPoolExecutor(max_workers=len(self.SPORTS_SERIES)) as pool:
-            futures = {pool.submit(self._fetch_one_series, s): s for s in self.SPORTS_SERIES}
-            for f in as_completed(futures):
-                all_markets.extend(f.result())
-        print(f"  ⚽ {len(all_markets)} sports markets fetched (parallel)")
-        return all_markets
-
     # ─────────────────────────────────────────────────────────────────────────
-    # TARGET SERIES — direct Kalshi fetches for high-signal short-term markets
-    # These are the event series that actually resolve in days/hours, not years.
+    # TARGET SERIES — direct Kalshi fetches for crypto/weather/econ markets
     # ─────────────────────────────────────────────────────────────────────────
+
     TARGET_EVENT_PREFIXES = (
         # Weather — daily city temperature & rain, resolves same day / next day
         "KXHIGHNY", "KXHIGHCHI", "KXHIGHMIA", "KXHIGHLAX", "KXHIGHTDAL",
@@ -571,25 +500,10 @@ class TradingEngine:
             top = max(skip_reasons, key=skip_reasons.get)
             self._status_msg = f"Scanning — top skip: {top} ({skip_reasons[top]})"
 
-    # Season-long futures — block entirely (0% win rate historically)
-    SEASON_PREFIXES = ("KXNBA-", "KXMLB-", "KXNHL-", "KXNFL-", "KXNASCAR-")
-
-    # Game-level sports markets — fine to trade with cross-market signal
-    SPORTS_PREFIXES = (
-        "KXNBAGAME", "KXMLBGAME", "KXNHLGAME",
-        "KXNBASPREAD", "KXMLBSPREAD", "KXNHLSPREAD",
-        "KXNBATOTAL", "KXMLBTOTAL", "KXNHLTOTAL",
-        "KXNBASTG",   "KXMLBSTG",   "KXNHLSTG",
-    )
-
     STOP_COOLDOWN_HOURS = 24
-    _5I_MIN_AGREE      = 3     # require 3/5 models (claude+gpt+grok reliable; gemini/mistral may error)
+    _5I_MIN_AGREE      = 4     # require 4/5 models — 3/5 was too easy, raised for tighter consensus
 
-    def _is_sports_game(self, ticker):
-        """True for game-level sports markets (KXNBAGAME-*, etc.) — NOT season futures."""
-        return any(ticker.startswith(p) for p in self.SPORTS_PREFIXES)
-
-    def _ask_5i(self, market, cross_signal, ext_prob, gap_pct, sources, inj_signal=None):
+    def _ask_5i(self, market, cross_signal, ext_prob, gap_pct, sources):
         """
         Final decision gate — asks 5i (5-model synthesis engine) whether this
         trade has real edge. Returns True if ≥ _5I_MIN_AGREE models say TRADE.
@@ -606,15 +520,6 @@ class TradingEngine:
         side     = "YES" if cross_signal == "YES" else "NO"
         buy_prob = yes_ask if cross_signal == "YES" else (100 - yes_ask)
 
-        # Build injury context line if available
-        inj_context = ""
-        if inj_signal and inj_signal.get("affected"):
-            players = ", ".join(
-                f"{a['player']} ({a['status']})"
-                for a in inj_signal["affected"][:3]
-            )
-            inj_context = f"Injury context: {players}\n"
-
         prompt = (
             f'Prediction market trade evaluation.\n\n'
             f'Market: "{title}"\n'
@@ -622,7 +527,6 @@ class TradingEngine:
             f'External consensus: {round(ext_prob*100)}% from {", ".join(sources)}\n'
             f'Edge gap: {gap_pct:.1f}% — external sources price it {gap_pct:.1f}% '
             f'{"higher" if side == "YES" else "lower"} than Kalshi\n'
-            f'{inj_context}'
             f'Proposed trade: BUY {side} at {buy_prob}¢\n\n'
             f'This edge passed volume, spread, cooldown, and direction filters. '
             f'Your job: catch anything those filters miss.\n'
@@ -696,12 +600,14 @@ class TradingEngine:
         if not ticker:
             return reject("no_ticker")
 
-        # Block ALL sports — season futures AND game markets.
-        # Sportsbooks + arb bots price these to near-zero edge. Bot loses here.
-        # Real edge lives in: weather, fed/econ, crypto, politics, pop culture.
-        ALL_SPORTS = self.SEASON_PREFIXES + self.SPORTS_PREFIXES
-        if any(ticker.startswith(p) for p in ALL_SPORTS):
-            return reject("sports_blocked")
+        # Markout circuit breaker — pause entries when we're being adversely selected
+        if time.time() < self._markout_pause_until:
+            mins_left = round((self._markout_pause_until - time.time()) / 60)
+            return reject(f"markout_circuit_breaker_{mins_left}m")
+
+        # Block season-long futures — 0% win rate, too far out.
+        if any(ticker.startswith(p) for p in self.SEASON_PREFIXES):
+            return reject("season_future_blocked")
 
         # Already in this market
         if ticker in self.positions:
@@ -731,7 +637,10 @@ class TradingEngine:
         category = self._detect_category(ticker, m.get("title", ""))
         m["_category"] = category   # stash so _enter_position can read it
 
-        BLOCKED_CATEGORIES = {"politics", "other", "pop_culture"}
+        # Sports blocked — game markets are efficiently priced by sharp bettors.
+        # Our data sources (NOAA, FedWatch, Polymarket gaps) have zero edge there.
+        # Real edge lives in: weather, econ, crypto, Fed rate decisions.
+        BLOCKED_CATEGORIES = {"politics", "other", "pop_culture", "sports"}
         if category in BLOCKED_CATEGORIES:
             return reject(f"category_blocked_{category}")
 
@@ -742,11 +651,14 @@ class TradingEngine:
                 self._spread_blocked += 1   # spread penalty was the deciding factor
             return reject("edge_score_low")
 
-        # Volume check — crypto needs higher liquidity threshold to avoid thin markets
+        # Volume check — sports game markets are deeply liquid (100k+), use higher floor
+        # Crypto needs higher liquidity to avoid thin volatile entries
         volume = int(m.get("volume", 0))
         min_vol = s.get("min_volume", 500)
         if category == "crypto":
             min_vol = max(min_vol, 1000)
+        if category == "sports":
+            min_vol = max(min_vol, 5000)   # only trade liquid game markets
         if volume < min_vol:
             return reject("low_volume")
 
@@ -764,8 +676,13 @@ class TradingEngine:
         # Spread quality score — gates hard rejects AND penalizes borderline markets
         # spread_ratio = spread / entry as a % of stop_loss → how much of the buffer is eaten on entry
         spread = yes_ask - yes_bid
-        # Crypto gets a tighter spread gate — choppier markets, late entries get burned fast
-        if category == "crypto":
+        # Spread gate — category-aware
+        # Sports game markets: 1-3¢ spread is normal (huge volume, tight market)
+        # Crypto: tighter gate — choppy, late entries get burned
+        # Others: standard gate
+        if category == "sports":
+            max_spread = 5    # game markets should be ≤2¢; allow up to 5¢
+        elif category == "crypto":
             max_spread = 10
         elif cross_signal:
             max_spread = 18
@@ -807,7 +724,7 @@ class TradingEngine:
         else:
             m["spread_sl_ratio"]  = round(spread_sl_ratio, 1)  # always store for winners/losers stat
 
-        # Time to expiry
+        # Time to expiry — must have ≥2h left
         close_time = m.get("close_time") or m.get("expected_expiration_time")
         if close_time:
             try:
@@ -816,6 +733,18 @@ class TradingEngine:
                 hours_left = (exp - datetime.now(timezone.utc)).total_seconds() / 3600
                 if hours_left < 2:
                     return reject("expiring_soon")
+            except Exception:
+                pass
+
+        # Open time gate — don't enter within 2h of event start (game already resolving)
+        open_time = m.get("open_time") or m.get("start_time")
+        if open_time:
+            try:
+                from datetime import timezone
+                start = datetime.fromisoformat(open_time.replace("Z", "+00:00"))
+                mins_since_open = (datetime.now(timezone.utc) - start).total_seconds() / 60
+                if mins_since_open > (24 * 60 - 120):   # within 2h of a 24h market closing
+                    return reject("event_near_resolution")
             except Exception:
                 pass
 
@@ -828,44 +757,15 @@ class TradingEngine:
         if cross_signal == "NO" and side != "no":
             return reject("direction_mismatch")
 
-        # ── Injury Signal ─────────────────────────────────────────────────────
-        # Check if a key player is OUT/Doubtful for this game.
-        # Fresh injury (< 30 min) = Kalshi almost certainly hasn't repriced.
-        # Boost the score and note it for the 5i prompt.
-        inj_signal = {"impact": "none", "boost": 0, "fresh": False, "affected": []}
-        if INJURY_ENABLED:
-            inj_signal = injury_scanner.get_injury_signal(
-                m.get("title", ""), m.get("ticker", "")
-            )
-            if inj_signal["boost"] > 0:
-                old_score = float(m.get("score", 0))
-                m["score"] = old_score + inj_signal["boost"]
-                m["injury_signal"] = inj_signal
-                tag = "🚨 FRESH" if inj_signal["fresh"] else "🏥"
-                print(f"  {tag} Injury boost +{inj_signal['boost']}pts → score={m['score']:.0f} | "
-                      f"{ticker} | "
-                      f"{', '.join(a['player'] + ' ' + a['status'] for a in inj_signal['affected'][:2])}")
-
-        # Re-check edge score after injury boost
-        score = float(m.get("score", 0))
-        if score < s.get("min_edge_score", 65):
-            if m.get("spread_penalty"):
-                self._spread_blocked += 1
-            return reject("edge_score_low_post_injury")
-
         # ── 5i Final Gate ─────────────────────────────────────────────────────
         # Only reached if ALL other filters passed. Asks 5 AI models whether
         # the edge is real. Requires ≥ 3/5 to say TRADE. ~$0.017/call.
-        # Fresh injury bypasses 5i — speed matters more than AI approval when
-        # the window is 5–15 minutes.
         gaps    = [g for _, g in ce.get("gaps", [])]
         sources = ce.get("sources", [])
         ext_prob = (sum(abs(g) for g in gaps) / len(gaps) + yes_ask / 100) if gaps else yes_ask / 100
         gap_pct  = abs(sum(gaps) / len(gaps)) * 100 if gaps else 0
 
-        if inj_signal.get("fresh"):
-            print(f"  ⚡ 5i bypassed — fresh injury signal, speed is the edge")
-        elif not self._ask_5i(m, cross_signal, ext_prob, gap_pct, sources, inj_signal):
+        if not self._ask_5i(m, cross_signal, ext_prob, gap_pct, sources):
             return reject("5i_rejected")
 
         return True
@@ -894,6 +794,21 @@ class TradingEngine:
         tl = title.lower()
 
         # ── Ticker-prefix detection (high confidence) ────────────────────────
+        # Sports — game outcomes, player props, parlays
+        SPORTS_PREFIXES_CAT = (
+            "KXNBAGAME", "KXMLBGAME", "KXNHLGAME", "KXNFLGAME",
+            "KXNBA3PT",  "KXNBAPTS",  "KXNBAAST",  "KXNBAREB",
+            "KXMLBHR",   "KXMLBHITS", "KXMLBK",
+            "KXNBASPREAD","KXMLBSPREAD","KXNHLSPREAD",
+            "KXNBATOTAL", "KXMLBTOTAL", "KXNHLTOTAL",
+            "KXMVESPORT", "KXMVECROSS",
+            "KXNFLWIN",  "KXF1GP",    "KXWCGAME",  "KXEPLGAME",
+            "KXNFL1H",   "KXNBA1H",   "KXMLB1H",
+            "KXNFLDIV",  "KXNBADIV",  "KXNHLDIV",
+        )
+        if any(t.startswith(p) for p in SPORTS_PREFIXES_CAT):
+            return "sports"
+
         # Weather — NOAA daily city temp/rain series (KXHIGH*, KXLOWT*, KXRAIN*)
         WEATHER_PREFIXES = (
             "KXHIGHNY", "KXHIGHCHI", "KXHIGHMIA", "KXHIGHLAX", "KXHIGHTDAL",
@@ -1084,18 +999,11 @@ class TradingEngine:
 
             # CLV: record entry now, resolve closing price near market close
             if CLV_ENABLED:
-                inj = m.get("injury_signal", {})
-                if inj.get("fresh"):
-                    sig_type = "injury_fresh"
-                elif inj.get("boost", 0) > 0:
-                    sig_type = "injury_boosted"
-                else:
-                    sig_type = "cross_market"
                 close_time = m.get("close_time") or m.get("expected_expiration_time") or ""
                 clv_tracker.record_entry(
                     ticker, side, entry_price, close_time,
                     title=m.get("title", ticker),
-                    signal_type=sig_type,
+                    signal_type="cross_market",
                 )
 
             if self.settings.get("notify_sms") or self.settings.get("notify_email"):
@@ -1147,6 +1055,30 @@ class TradingEngine:
                             pos["worst_adverse"] = round(mo, 2)
             except Exception:
                 pass
+
+    def _check_markout_circuit_breaker(self):
+        """
+        After every exit, look at the last 3 closed trades.
+        If ALL 3 have negative +15s markout, we're being systematically
+        adversely selected. Pause new entries for 60 minutes.
+        """
+        try:
+            trades = self._load_trades()
+            today  = datetime.now().strftime("%Y-%m-%d")
+            recent = [t for t in trades if t.get("exit_time", "").startswith(today)][-3:]
+            if len(recent) < 3:
+                return
+            all_adverse = all(
+                t.get("markout", {}).get("s15", 0) < 0
+                for t in recent
+            )
+            if all_adverse:
+                pause_secs = 3600  # 1 hour
+                self._markout_pause_until = time.time() + pause_secs
+                print(f"  ⚠ MARKOUT CIRCUIT BREAKER: last 3 trades all adversely selected "
+                      f"at +15s — pausing entries for 60 min")
+        except Exception:
+            pass
 
     # ── Exit Logic ────────────────────────────────────────────────────────────
 
@@ -1353,6 +1285,7 @@ class TradingEngine:
             "worst_adverse":   pos.get("worst_adverse", 0.0),
         }
         self._record_trade(trade_record)
+        self._check_markout_circuit_breaker()
 
         if self.settings.get("notify_sms") or self.settings.get("notify_email"):
             if pnl_dollars >= 0:
@@ -1572,14 +1505,6 @@ class TradingEngine:
             except Exception:
                 pass
 
-        # Injury scanner status
-        injury_status = {}
-        if INJURY_ENABLED:
-            try:
-                injury_status = injury_scanner.status_summary()
-            except Exception:
-                pass
-
         # Markout summary — average midpoint drift at each checkpoint
         closed_sells = [t for t in self.trades if t.get("event") == "sell" and t.get("markout")]
         def _avg_markout(key):
@@ -1620,7 +1545,6 @@ class TradingEngine:
             "spread_attribution": spread_attr,
             "dead_market_stats":  dead_stats,
             "clv":              clv_summary,
-            "injury":           injury_status,
             "markout":          markout_summary,
         }
 
