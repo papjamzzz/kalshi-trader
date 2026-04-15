@@ -39,6 +39,8 @@ import noaa
 import ndfd
 import econ_signals
 import coingecko
+import odds_api
+
 
 # ── Shared state — written by bg thread, read by scan ────────────────────────
 _lock       = threading.Lock()
@@ -155,6 +157,7 @@ def start_background_fetcher():
     ndfd.start()               # starts NDFD background thread (hourly)
     econ_signals.start()       # starts BLS/FRED/GDPNow background thread (4h)
     coingecko.start()          # starts CoinGecko price feed (3 min refresh)
+    # odds_api.start() — disabled: sports category blocked, injury feed not needed
     threading.Thread(target=_fetch_polymarket, daemon=True).start()
     threading.Thread(target=_fetch_predictit,  daemon=True).start()
     print("  [Cross] Background prefetch started — Polymarket(90s) / PredictIt(5m) / FedWatch(1h) / NOAA(1h) / NDFD-hourly(1h) / EconSignals(4h) / CoinGecko(3m)")
@@ -205,29 +208,40 @@ def compute_cross_edge(kalshi_market, pm_markets, pi_markets):
         "cg_coin":     None,
         "cg_price":    None,
         "cg_detail":   None,
+        # OddsAPI (sportsbook lines)
+        "odds_prob":   None,
+        "odds_books":  None,
+        "odds_detail": None,
     }
 
     external_probs = []
+    ticker = kalshi_market.get("ticker", "")
+
+    # Game markets get sportsbook lines — skip keyword matching (false positives)
+    _is_game = any(ticker.startswith(p) for p in
+                   ("KXNBAGAME", "KXMLBGAME", "KXNHLGAME"))
 
     # ── 1. Polymarket ────────────────────────────────────────────────────────
-    pm, pm_sim = _best_match(title, pm_markets, lambda m: m["question"])
-    if pm and pm.get("yes_prob") is not None:
-        pm_p = pm["yes_prob"]
-        gap  = pm_p - kalshi_p
-        result.update(pm_match=pm["question"], pm_prob=round(pm_p, 4), pm_sim=round(pm_sim, 3))
-        result["sources"].append("Polymarket")
-        result["gaps"].append(("Polymarket", gap))
-        external_probs.append(pm_p)
+    if not _is_game:
+        pm, pm_sim = _best_match(title, pm_markets, lambda m: m["question"])
+        if pm and pm.get("yes_prob") is not None:
+            pm_p = pm["yes_prob"]
+            gap  = pm_p - kalshi_p
+            result.update(pm_match=pm["question"], pm_prob=round(pm_p, 4), pm_sim=round(pm_sim, 3))
+            result["sources"].append("Polymarket")
+            result["gaps"].append(("Polymarket", gap))
+            external_probs.append(pm_p)
 
     # ── 2. PredictIt ─────────────────────────────────────────────────────────
-    pi, pi_sim = _best_match(title, pi_markets, lambda m: m["question"])
-    if pi and pi.get("yes_prob") is not None:
-        pi_p = pi["yes_prob"]
-        gap  = pi_p - kalshi_p
-        result.update(pi_match=pi["question"], pi_prob=round(pi_p, 4), pi_sim=round(pi_sim, 3))
-        result["sources"].append("PredictIt")
-        result["gaps"].append(("PredictIt", gap))
-        external_probs.append(pi_p)
+    if not _is_game:
+        pi, pi_sim = _best_match(title, pi_markets, lambda m: m["question"])
+        if pi and pi.get("yes_prob") is not None:
+            pi_p = pi["yes_prob"]
+            gap  = pi_p - kalshi_p
+            result.update(pi_match=pi["question"], pi_prob=round(pi_p, 4), pi_sim=round(pi_sim, 3))
+            result["sources"].append("PredictIt")
+            result["gaps"].append(("PredictIt", gap))
+            external_probs.append(pi_p)
 
     # ── 3. CME FedWatch ──────────────────────────────────────────────────────
     fed = fedwatch.match_market(title)
@@ -317,6 +331,8 @@ def compute_cross_edge(kalshi_market, pm_markets, pi_markets):
         result["sources"].append("CoinGecko")
         result["gaps"].append(("CoinGecko", gap))
         external_probs.append(cg_p)
+
+    # ── 8. OddsAPI — disabled (sports category blocked, no edge in game markets) ─
 
     if not external_probs:
         return result
