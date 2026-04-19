@@ -58,17 +58,19 @@ DEFAULT_SETTINGS = {
     "max_positions":   5,       # tight cap while rebuilding trust
     "daily_loss_cap":  5.00,    # $ before bot stops for the day
     "min_volume":      500,     # contracts in pool (game markets have lower volume)
-    "take_profit_pct": 10.0,    # % gain to exit (achievable intraday on prediction markets)
-    "stop_loss_pct":   12.0,    # % loss to exit (wrong is wrong, exit fast)
-    "min_edge_score":  75.0,    # higher threshold — cross-market bonus must be real
+    "take_profit_pct": 20.0,    # % gain to exit — let winners run (was 10, too tight)
+    "stop_loss_pct":   8.0,     # % loss to exit — cut losers faster (was 12, too loose)
+    "min_edge_score":  82.0,    # tighter threshold: base 72 + 10pt gap bonus minimum
+    "min_sources":     2,       # require 2+ confirming sources (was 1, too easy to pass)
     "scan_interval":   120,     # seconds between scans
     "notify_sms":      False,   # send SMS on trades
     "notify_email":    True,    # send email on trades
 }
 
-SETTINGS_FILE = "settings.json"
-TRADES_FILE   = "trades.json"
-KK_API        = "http://localhost:5555/api/markets"
+SETTINGS_FILE   = "settings.json"
+TRADES_FILE     = "trades.json"
+COOLDOWNS_FILE  = "data/cooldowns.json"
+KK_API          = "http://localhost:5555/api/markets"
 
 
 class TradingEngine:
@@ -87,8 +89,8 @@ class TradingEngine:
 
         # FIX Bug 2: cooldown after stop-loss — ticker → timestamp of last SL exit
         # No re-entry within STOP_COOLDOWN_HOURS after a stop loss
-        self._stopped_out = {}  # type: dict
-        STOP_COOLDOWN_HOURS = 24
+        # Persisted to disk so cooldowns survive restarts (was reset on restart before)
+        self._stopped_out = self._load_cooldowns()
 
         # UX: skip-reason counters — surfaced in status so operator knows WHY
         # the bot scanned N markets and entered 0 positions
@@ -172,6 +174,34 @@ class TradingEngine:
         with open(TRADES_FILE, "w") as f:
             json.dump(self.trades[-500:], f, indent=2)  # keep last 500
 
+    def _load_cooldowns(self):
+        """Load stop-loss cooldowns from disk so they survive restarts."""
+        try:
+            if os.path.exists(COOLDOWNS_FILE):
+                with open(COOLDOWNS_FILE) as f:
+                    raw = json.load(f)
+                # Prune expired entries immediately on load
+                now = time.time()
+                active = {k: v for k, v in raw.items()
+                          if (now - v) / 3600 < self.STOP_COOLDOWN_HOURS}
+                if len(active) < len(raw):
+                    print(f"  📂 Cooldowns: {len(active)} active ({len(raw)-len(active)} expired pruned)")
+                elif active:
+                    print(f"  📂 Cooldowns loaded: {list(active.keys())}")
+                return active
+        except Exception:
+            pass
+        return {}
+
+    def _save_cooldowns(self):
+        """Persist current cooldown state to disk."""
+        try:
+            os.makedirs(os.path.dirname(COOLDOWNS_FILE), exist_ok=True)
+            with open(COOLDOWNS_FILE, "w") as f:
+                json.dump(self._stopped_out, f)
+        except Exception as e:
+            print(f"  ⚠ Failed to save cooldowns: {e}")
+
     def _record_trade(self, trade):
         with self._lock:
             self.trades.append(trade)
@@ -180,7 +210,8 @@ class TradingEngine:
     # ── Control ───────────────────────────────────────────────────────────────
 
     def start(self):
-        if self.running:
+        # Zombie thread guard — prevent duplicate engines on restart
+        if self.running and self._thread and self._thread.is_alive():
             return
         self.running = True
         self._status_msg = "Running"
@@ -503,6 +534,14 @@ class TradingEngine:
     STOP_COOLDOWN_HOURS = 24
     _5I_MIN_AGREE      = 4     # require 4/5 models — 3/5 was too easy, raised for tighter consensus
 
+    # Season-long futures — too far out, 0% win rate on short-term edge strategy
+    # These are championship/pennant/division futures that resolve months away
+    SEASON_PREFIXES = (
+        "KXNBACHAMP", "KXMLBWS", "KXNHLSTCUP", "KXNFLSB",
+        "KXNBADIV", "KXMLBDIV", "KXNHLDIV", "KXNFLDIV",
+        "KXNBACONF", "KXMLBCONF", "KXNHLCONF", "KXNFLCONF",
+    )
+
     def _ask_5i(self, market, cross_signal, ext_prob, gap_pct, sources):
         """
         Final decision gate — asks 5i (5-model synthesis engine) whether this
@@ -581,9 +620,9 @@ class TradingEngine:
                 print(f"  ⚠ 5i unreachable ({url.split('/')[2]}): {e}")
                 continue
 
-        # Both URLs failed — fail open (don't block trade on infra issue)
-        print(f"  ⚠ 5i unavailable — proceeding without synthesis gate")
-        return True
+        # Both URLs failed — fail closed (never trade without the synthesis gate)
+        print(f"  ⚠ 5i unavailable — skipping trade (fail-closed)")
+        return False
 
     def _should_enter(self, m, s, skip_reasons=None):
         """
@@ -629,6 +668,12 @@ class TradingEngine:
         cross_signal = ce.get("signal")
         if cross_signal not in ("YES", "NO"):
             return reject("conflicted_cross_signal")
+
+        # Require minimum number of confirming sources — single-source signals are noisy
+        n_sources = len(ce.get("sources") or [])
+        min_sources = s.get("min_sources", 2)
+        if n_sources < min_sources:
+            return reject(f"insufficient_sources_{n_sources}")
 
         # ── Category filter ──────────────────────────────────────────────
         # Focus: weather > econ > crypto (secondary). Block: politics, other.
@@ -1218,37 +1263,37 @@ class TradingEngine:
         # losing market every 120 seconds until the daily cap hits
         if reason == "stop_loss":
             self._stopped_out[ticker] = time.time()
+            self._save_cooldowns()   # persist so restarts don't reset cooldowns
 
-        # FIX Bug 9: verify exit order fills — don't silently mark closed if
-        # the limit order rests unfilled in a thin market
+        # Exit order fill: retry loop stepping price down until filled.
+        # Steps: exit_price → -5¢ → -10¢ → -15¢ → -20¢ (5 attempts, 2s each)
         exit_filled = False
         try:
             if PAPER_TRADING:
                 exit_filled = True   # paper: always "filled" instantly
-                order_id = ""
             else:
-                order = kapi.place_order(ticker, side, count, exit_price, action="sell")
-                order_id = order.get("order_id") or order.get("id", "")
-            if order_id:
-                time.sleep(2)   # give Kalshi matching engine time to fill
-                order_status = kapi.get_order_status(order_id)
-                exit_filled = order_status.get("status") == "executed"
-                if not exit_filled:
-                    # Try 3¢ lower to increase fill probability
+                fire_price  = exit_price
+                MAX_RETRIES = 5
+                for attempt in range(MAX_RETRIES):
+                    order    = kapi.place_order(ticker, side, count, fire_price, action="sell")
+                    order_id = order.get("order_id") or order.get("id", "")
+                    if not order_id:
+                        exit_filled = True   # no id = likely inline fill
+                        break
+                    time.sleep(2)
+                    status = kapi.get_order_status(order_id)
+                    if status.get("status") == "executed":
+                        exit_filled = True
+                        break
+                    # Not filled — cancel and step price down
                     kapi.cancel_order(order_id)
-                    fire_price = max(1, exit_price - 3)
-                    order2 = kapi.place_order(ticker, side, count, fire_price, action="sell")
-                    order_id2 = order2.get("order_id") or order2.get("id", "")
-                    if order_id2:
-                        time.sleep(2)
-                        s2 = kapi.get_order_status(order_id2)
-                        exit_filled = s2.get("status") == "executed"
-                    if not exit_filled:
-                        msg = f"Exit order RESTING unfilled: {ticker} — check Kalshi"
-                        print(f"  ⚠ {msg}")
-                        self._last_error = msg   # UX: persists on dashboard until cleared
-            else:
-                exit_filled = True  # no order_id = likely executed inline
+                    fire_price = max(5, fire_price - 5)
+                    print(f"  ↓ Exit retry {attempt+1}/{MAX_RETRIES}: {ticker} @ {fire_price}¢")
+
+                if not exit_filled:
+                    msg = f"Exit order RESTING unfilled after {MAX_RETRIES} attempts: {ticker} — check Kalshi"
+                    print(f"  ⚠ {msg}")
+                    self._last_error = msg
         except Exception as e:
             err_msg = f"Exit order error: {ticker} — {str(e)[:80]}"
             print(f"  ⚠ {err_msg}")

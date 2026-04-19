@@ -181,9 +181,24 @@ def exit_all():
     return jsonify({"ok": True, "msg": f"closed {count} position(s)"})
 
 
+@app.route("/api/mode", methods=["POST"])
+@_require_token
+def set_mode():
+    """Toggle paper / live trading mode."""
+    import trader as t_mod
+    data = request.get_json(force=True)
+    paper = bool(data.get("paper", True))
+    t_mod.PAPER_TRADING = paper
+    mode = "paper" if paper else "live"
+    print(f"  🔄 Trading mode → {mode.upper()}")
+    return jsonify({"ok": True, "paper_trading": paper, "mode": mode})
+
+
 # ── Run ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5559))
+    host = "0.0.0.0" if os.environ.get("RAILWAY_ENVIRONMENT") else "127.0.0.1"
     print("  🤖 KK Trader — Factory Without Lights")
-    print("  🌐 http://localhost:5559")
-    app.run(host="127.0.0.1", port=5559, debug=False)
+    print(f"  🌐 http://{host}:{port}")
+    app.run(host=host, port=port, debug=False)

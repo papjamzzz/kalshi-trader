@@ -18,9 +18,7 @@ CLV calculation:
                  Positive = NO price moved in our direction before close
 
 signal_type tags let you compare edge sources:
-  "injury_fresh"    — bypassed 5i, pure speed play
-  "injury_boosted"  — stale injury + cross-market, went through 5i
-  "cross_market"    — Polymarket/books signal only
+  "cross_market"    — Polymarket/FedWatch/CoinGecko/NOAA/etc signal
 """
 
 import os
@@ -44,7 +42,7 @@ def record_entry(ticker, side, entry_price, close_time,
     """
     Call immediately when a position opens.
     close_time: ISO string from Kalshi market data.
-    signal_type: tag for later analysis ('injury_fresh' / 'injury_boosted' / 'cross_market').
+    signal_type: tag for later analysis (e.g. 'cross_market').
     """
     with _lock:
         _pending[ticker] = {

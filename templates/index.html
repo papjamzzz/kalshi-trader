@@ -1019,6 +1019,8 @@
   <button class="t-btn" id="btn-stop"  onclick="stopBot()">■&nbsp; Stop</button>
   <button class="t-btn" id="btn-sell-all" onclick="sellAll()"
           style="color:var(--red);border-color:var(--red);background:var(--red-dim);margin-left:6px;font-weight:700">⚡ Sell All</button>
+  <button class="t-btn" id="btn-mode" onclick="toggleMode()"
+          style="color:var(--amber);border-color:rgba(245,166,35,0.4);background:rgba(245,166,35,0.08);font-family:var(--mono);letter-spacing:1px">📋 PAPER</button>
   <button class="t-btn" id="btn-kalshi"
           onclick="window.open('https://kalshi.com','_blank')">Kalshi ↗</button>
   <button class="t-btn" id="btn-guide"
@@ -1359,10 +1361,10 @@
       <div class="fader-strip">
         <div class="fader-head">
           <span class="fader-name">Stop Loss</span>
-          <span class="fader-val red" id="val-stop-loss">20%</span>
+          <span class="fader-val red" id="val-stop-loss">8%</span>
         </div>
         <input type="range" class="c-red" id="fader-stop-loss"
-               min="5" max="50" step="1" value="20"
+               min="5" max="50" step="1" value="8"
                oninput="updateFader('stop_loss_pct',parseInt(this.value),'val-stop-loss',v=>v+'%','red')">
         <div class="fader-range"><span>5%</span><span>50%</span></div>
         <div class="fader-desc">Exit when loss exceeds this %</div>
@@ -1372,13 +1374,26 @@
       <div class="fader-strip">
         <div class="fader-head">
           <span class="fader-name">Min Edge Score</span>
-          <span class="fader-val amber" id="val-edge">65</span>
+          <span class="fader-val amber" id="val-edge">82</span>
         </div>
         <input type="range" class="c-amber" id="fader-edge"
-               min="20" max="95" step="1" value="65"
+               min="20" max="95" step="1" value="82"
                oninput="updateFader('min_edge_score',parseInt(this.value),'val-edge',v=>v+'','amber')">
         <div class="fader-range"><span>20</span><span>95</span></div>
         <div class="fader-desc">KK score required to trigger entry</div>
+      </div>
+
+      <!-- Min Sources -->
+      <div class="fader-strip">
+        <div class="fader-head">
+          <span class="fader-name">Min Sources</span>
+          <span class="fader-val amber" id="val-min-sources">2</span>
+        </div>
+        <input type="range" class="c-amber" id="fader-min-sources"
+               min="1" max="5" step="1" value="2"
+               oninput="updateFader('min_sources',parseInt(this.value),'val-min-sources',v=>v+'','amber')">
+        <div class="fader-range"><span>1</span><span>5</span></div>
+        <div class="fader-desc">Require this many confirming external sources</div>
       </div>
 
       <!-- Scan Interval -->
@@ -1524,6 +1539,31 @@ function saveSettings() {
 // ─── Bot control ──────────────────────────────────────────────────────────────
 function startBot() { fetch('/api/bot/start',{method:'POST',headers:authHeaders()}).then(()=>poll()); }
 function stopBot()  { fetch('/api/bot/stop', {method:'POST',headers:authHeaders()}).then(()=>poll()); }
+
+let _isPaper = true;
+function syncModeBtn(paper) {
+  _isPaper = paper;
+  const btn = document.getElementById('btn-mode');
+  if (paper) {
+    btn.textContent = '📋 PAPER';
+    btn.style.color = 'var(--amber)';
+    btn.style.borderColor = 'rgba(245,166,35,0.4)';
+    btn.style.background  = 'rgba(245,166,35,0.08)';
+  } else {
+    btn.textContent = '🟢 LIVE';
+    btn.style.color = 'var(--green)';
+    btn.style.borderColor = 'rgba(0,213,149,0.4)';
+    btn.style.background  = 'rgba(0,213,149,0.08)';
+  }
+}
+function toggleMode() {
+  const newPaper = !_isPaper;
+  if (!newPaper && !confirm('Switch to LIVE trading? Real money will be at risk.')) return;
+  fetch('/api/mode', {method:'POST', headers:authHeaders(), body: JSON.stringify({paper: newPaper})})
+    .then(r => r.json())
+    .then(d => { syncModeBtn(d.paper_trading); poll(); })
+    .catch(() => {});
+}
 function sellAll() {
   if (!confirm('Sell ALL open positions at market price?')) return;
   const btn = document.getElementById('btn-sell-all');
@@ -1560,8 +1600,9 @@ function poll() {
 }
 
 function updateUI(d) {
-  // Paper trading banner
+  // Paper trading banner + mode button sync
   document.getElementById('paper-bar').style.display = d.paper_trading ? 'block' : 'none';
+  syncModeBtn(d.paper_trading);
 
   // LED
   const led = document.getElementById('bot-led');
@@ -1875,15 +1916,16 @@ function updateDiagnostics(d) {
 
 function syncFaders(s) {
   const map = [
-    ['fader-max-spend',   v => Math.round(v*100),  'val-max-spend',  v => '$'+v.toFixed(2)],
-    ['fader-daily-loss',  v => Math.round(v*100),  'val-daily-loss', v => '$'+v.toFixed(2)],
-    ['fader-min-vol',     v => v,                  'val-min-vol',    v => parseInt(v).toLocaleString()],
-    ['fader-take-profit', v => v,                  'val-take-profit',v => v+'%'],
-    ['fader-stop-loss',   v => v,                  'val-stop-loss',  v => v+'%'],
-    ['fader-edge',        v => v,                  'val-edge',       v => v+''],
-    ['fader-scan',        v => v,                  'val-scan',       v => v+'s'],
+    ['fader-max-spend',    v => Math.round(v*100),  'val-max-spend',    v => '$'+v.toFixed(2)],
+    ['fader-daily-loss',   v => Math.round(v*100),  'val-daily-loss',   v => '$'+v.toFixed(2)],
+    ['fader-min-vol',      v => v,                  'val-min-vol',      v => parseInt(v).toLocaleString()],
+    ['fader-take-profit',  v => v,                  'val-take-profit',  v => v+'%'],
+    ['fader-stop-loss',    v => v,                  'val-stop-loss',    v => v+'%'],
+    ['fader-edge',         v => v,                  'val-edge',         v => v+''],
+    ['fader-scan',         v => v,                  'val-scan',         v => v+'s'],
+    ['fader-min-sources',  v => v,                  'val-min-sources',  v => v+''],
   ];
-  const keys = ['max_spend','daily_loss_cap','min_volume','take_profit_pct','stop_loss_pct','min_edge_score','scan_interval'];
+  const keys = ['max_spend','daily_loss_cap','min_volume','take_profit_pct','stop_loss_pct','min_edge_score','scan_interval','min_sources'];
   map.forEach(([id, toSlider, displayId, fmt], i) => {
     const key = keys[i];
     if (s[key] !== undefined) {
