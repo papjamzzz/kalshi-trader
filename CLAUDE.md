@@ -7,7 +7,8 @@ Companion to KK (Kalshi Konnektor) on port 5555.
 This app runs on **port 5559**.
 
 ## Status
-🟡 Built — needs Kalshi trading API key permissions enabled + Twilio account
+✅ Live on Railway — https://kk-trader-production.up.railway.app
+Paper mode ON by default. Switch to LIVE via the mode button in the UI when CLV > 55% over 50+ trades.
 
 ## Architecture
 - `app.py` — Flask server (port 5559)
