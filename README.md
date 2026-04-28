@@ -159,4 +159,4 @@ Built by [Creative Konsoles](https://creativekonsoles.com) — tools built using
 
 **[creativekonsoles.com](https://creativekonsoles.com)** &nbsp;·&nbsp; support@creativekonsoles.com
 
-<!-- repo maintenance: 2026-04-10 -->
+Also in the suite: **[5i](https://creativekonsoles.com)** · **[Grail](https://grailorbital.creativekonsoles.com)** · **[Memoir](https://memoir.creativekonsoles.com)**
