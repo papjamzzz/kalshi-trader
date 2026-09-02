@@ -8,3 +8,6 @@ settings.json
 
 data/
 app.log
+
+# runtime logs
+*.log
